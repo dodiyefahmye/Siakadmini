@@ -223,6 +223,9 @@ function getLocation() {
       () => res({}), { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
   });
 }
+/** Minta lokasi HANYA bila admin mengaktifkan validasi GPS (menghemat hingga 8 detik per absen) */
+function geoIfNeeded() { return S.settings && S.settings.geo_aktif ? getLocation() : Promise.resolve({}); }
+
 function downloadCsv(filename, headers, rows) {
   const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
   const csv = '﻿' + [headers].concat(rows).map(r => r.map(q).join(';')).join('\r\n');
@@ -299,6 +302,31 @@ function api(action, data, opt) {
     throw err;
   });
 }
+
+/**
+ * Tampil-cepat (stale-while-revalidate): data terakhir yang tersimpan di HP langsung ditampilkan,
+ * lalu diperbarui diam-diam dari server. Halaman terasa instan walau server butuh 1–3 detik.
+ * render(data, dariCache) bisa dipanggil dua kali.
+ */
+async function swr(key, action, data, render) {
+  const k = 'swr_' + (S.user ? S.user.id : '') + '_' + key;
+  const cached = store.get(k);
+  if (cached) { try { render(cached, true); } catch (e) { console.error(e); } }
+  try {
+    const fresh = await api(action, data, { silent: !!cached, quiet: !!cached });
+    store.set(k, fresh);
+    render(fresh, false);
+    return fresh;
+  } catch (e) {
+    if (cached) { toast('Mode offline: menampilkan data terakhir', 'warning'); return cached; }
+    throw e;
+  }
+}
+function clearSwr() {
+  try { Object.keys(localStorage).filter(k => k.indexOf('siakad_swr_') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { }
+}
+/** Hapus grafik lama sebelum menggambar ulang (dipakai bersama swr) */
+function resetCharts() { S.charts.forEach(c => { try { c.destroy(); } catch (e) { } }); S.charts = []; }
 
 /* ---------------- master data (kelas/mapel/guru) ---------------- */
 async function getMaster(force) {
@@ -550,6 +578,7 @@ async function doLogout(kicked, msg) {
   if (!kicked && S.token) { try { await api('logout', {}, { quiet: true }); } catch (e) { } }
   if (window.Exam) Exam.forceClose();
   leaveView();
+  clearSwr();
   store.del('auth');
   S.token = null; S.user = null; S.master = null;
   renderLogin(kicked ? msg : '');
@@ -600,7 +629,9 @@ VIEWS.dashAdmin = {
   title: 'Dashboard',
   render: async function (el) {
     el.innerHTML = pageHead('Dashboard Admin', 'Ringkasan aktivitas sekolah hari ini') + '<div id="dz">' + spinner() + '</div>';
-    const d = await api('dashboardAdmin', {}, { silent: true });
+    await swr('dashAdmin', 'dashboardAdmin', {}, d => {
+    if (!el.isConnected) return;
+    resetCharts();
     const h = d.hari_ini;
     const totalHari = h.Hadir + h.Terlambat + h.Izin + h.Sakit + h.Alpha;
     $('#dz', el).innerHTML =
@@ -630,6 +661,7 @@ VIEWS.dashAdmin = {
       type: 'doughnut',
       data: { labels: Object.keys(h), datasets: [{ data: Object.values(h), backgroundColor: ['#22c55e', '#facc15', '#38bdf8', '#a78bfa', '#ef4444'] }] },
       options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
     });
   }
 };
@@ -861,19 +893,40 @@ function camErr(e) {
 
 /* ---------------- Pengenalan wajah (face-api.js) ---------------- */
 const Face = {
-  ready: false, stream: null,
+  ready: false, stream: null, _p: null,
+  /** Memuat pustaka + model sekali saja; panggilan berikutnya menunggu proses yang sama */
   async load(msgFn) {
     if (this.ready) return;
-    msgFn && msgFn('Memuat pustaka pengenalan wajah…');
-    await loadScript(FACE_LIB);
-    msgFn && msgFn('Memuat model wajah (±6 MB, hanya pertama kali)…');
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL),
-      faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL)
-    ]);
-    this.ready = true;
+    if (!this._p) {
+      this._p = (async () => {
+        await loadScript(FACE_LIB);
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(FACE_MODEL)
+        ]);
+        await this.warmup();
+        this.ready = true;
+      })();
+    }
+    msgFn && msgFn('Menyiapkan pengenalan wajah (pertama kali ±6 MB)…');
+    try { await this._p; } catch (e) { this._p = null; throw e; }
   },
+  /**
+   * Pemanasan: inferensi pertama di GPU HP butuh 1–3 detik untuk kompilasi.
+   * Dilakukan di belakang layar agar deteksi pertama di depan siswa langsung cepat.
+   */
+  async warmup() {
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 160;
+      const g = c.getContext('2d'); g.fillStyle = '#999'; g.fillRect(0, 0, 160, 160);
+      await faceapi.detectSingleFace(c, this.fastOpts()).withFaceLandmarks();
+      await faceapi.computeFaceDescriptor(c);
+    } catch (e) { /* abaikan */ }
+  },
+  /** Muat model di latar belakang (dipanggil saat siswa membuka menu Absen/Wajah) */
+  preload() { if (!this.ready && !this._p) setTimeout(() => this.load().catch(() => { }), 800); },
   async start(video, facing) {
     this.stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Browser tidak mendukung akses kamera. Gunakan Chrome/Safari versi terbaru.');
@@ -887,7 +940,20 @@ const Face = {
   },
   stop() { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } },
   opts() { return new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }); },
+  fastOpts() { return new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.45 }); },
+  /** Deteksi lengkap + descriptor (berat) — dipakai SEKALI setelah kedip berhasil */
   async detect(video) { return faceapi.detectSingleFace(video, this.opts()).withFaceLandmarks().withFaceDescriptor(); },
+  /** Deteksi ringan (tanpa descriptor) — dipakai berulang untuk memantau kedipan */
+  async detectFast(video) { return faceapi.detectSingleFace(video, this.fastOpts()).withFaceLandmarks(); },
+  /** Ambil descriptor final, coba beberapa kali bila wajah sempat hilang */
+  async finalDescriptor(video) {
+    for (let i = 0; i < 6; i++) {
+      const d = await this.detect(video);
+      if (d) return d;
+      await sleep(80);
+    }
+    throw new Error('Wajah hilang dari bingkai. Tahan posisi sebentar setelah berkedip.');
+  },
   async countFaces(video) { return (await faceapi.detectAllFaces(video, this.opts())).length; },
   ear(p) { const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y); return (d(p[1], p[5]) + d(p[2], p[4])) / (2 * d(p[0], p[3])); },
   /**
@@ -903,8 +969,8 @@ const Face = {
         if (isActive && !isActive()) return reject(new Error('dibatalkan'));
         if (Date.now() - t0 > (timeoutMs || 25000)) return reject(new Error('Waktu habis. Pastikan wajah terlihat jelas lalu berkedip perlahan.'));
         let det = null;
-        try { det = await this.detect(video); } catch (e) { }
-        if (!det) { msg('Arahkan wajah ke dalam bingkai…', 'warn'); return setTimeout(step, 150); }
+        try { det = await this.detectFast(video); } catch (e) { }
+        if (!det) { msg('Arahkan wajah ke dalam bingkai…', 'warn'); return setTimeout(step, 100); }
         frames++;
         const lm = det.landmarks;
         const ear = (this.ear(lm.getLeftEye()) + this.ear(lm.getRightEye())) / 2;
@@ -913,10 +979,10 @@ const Face = {
           msg('Wajah terdeteksi — silakan BERKEDIP perlahan', 'info');
           if (frames > 3 && maxEar > 0.18 && ear < maxEar * 0.72) closed = true;
         } else if (ear > maxEar * 0.85) {
-          msg('Kedipan terdeteksi ✓', 'ok');
-          return resolve(det);
+          msg('Kedipan terdeteksi ✓ — memproses wajah…', 'ok');
+          return this.finalDescriptor(video).then(resolve, reject);
         }
-        setTimeout(step, 40);
+        setTimeout(step, 0);
       };
       step();
     });
@@ -934,12 +1000,17 @@ const QRS = {
   async start(elId, onCode) {
     await loadScript(QR_LIB);
     await this.stop();
-    this.inst = new Html5Qrcode(elId);
+    // Hanya format QR + pakai BarcodeDetector bawaan browser bila tersedia (jauh lebih cepat)
+    this.inst = new Html5Qrcode(elId, {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false
+    });
     this.busy = false;
     onLeave(() => this.stop());
     try {
       await this.inst.start({ facingMode: 'environment' },
-        { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+        { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
         txt => { if (this.busy) return; this.busy = true; onCode(txt); }, () => { });
     } catch (e) { throw new Error(camErr(e)); }
   },
@@ -951,7 +1022,7 @@ const QRS = {
     await loadScript(QR_LIB);
     let d = document.getElementById('qrFileTmp');
     if (!d) { d = document.createElement('div'); d.id = 'qrFileTmp'; d.style.display = 'none'; document.body.appendChild(d); }
-    const h = new Html5Qrcode('qrFileTmp');
+    const h = new Html5Qrcode('qrFileTmp', { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], experimentalFeatures: { useBarCodeDetectorIfSupported: true }, verbose: false });
     try { return await h.scanFile(file, false); } finally { try { h.clear(); } catch (e) { } }
   }
 };
@@ -1133,6 +1204,7 @@ VIEWS.kiosk = {
   render: async function (el, p) {
     if (!p.id) {
       el.innerHTML = pageHead('Mode Kiosk Wajah', 'Satu perangkat (laptop/tablet) di depan kelas untuk memindai wajah siswa bergantian') + spinner();
+      Face.preload();
       const list = (await api('listSesi', { aktif: true }, { silent: true })).filter(r => r.metode !== 'QR' && r.status === 'AKTIF');
       el.innerHTML = pageHead('Mode Kiosk Wajah', 'Pilih sesi absensi aktif (metode Wajah atau QR+Wajah)', '<button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>') +
         '<div class="card"><div class="card-body">' + tableHtml([
@@ -1157,8 +1229,7 @@ VIEWS.kiosk = {
       later(() => { const f = $('#kFlash', el); if (f) f.innerHTML = ''; }, 2600);
     };
     try {
-      await Face.load(t => setCamMsg(msg, t));
-      await Face.start(video, 'user');
+      await Promise.all([Face.load(t => setCamMsg(msg, t)), Face.start(video, 'user')]);
     } catch (e) { setCamMsg(msg, e.message, 'err'); return; }
     while (active) {
       try {
@@ -1173,7 +1244,7 @@ VIEWS.kiosk = {
         flash(false, '<i class="bi bi-x-circle" style="font-size:3rem"></i><div class="fs-6">' + esc(e.message) + '</div>');
         if (/ditutup/i.test(e.message)) break;
       }
-      await sleep(2800);
+      await sleep(1800);
     }
   }
 };
@@ -1187,9 +1258,12 @@ VIEWS.absenSiswa = {
     el.innerHTML = pageHead('Absensi Hari Ini', 'Pilih cara absen sesuai instruksi guru', '<button class="btn btn-light btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button>') +
       '<button class="btn btn-primary w-100 py-3 mb-3 fw-semibold" data-act="scan"><i class="bi bi-qr-code-scan fs-5"></i> Scan QR Absensi</button>' +
       '<div id="sAktif">' + spinner() + '</div>';
+    Face.preload(); // siapkan model wajah selagi siswa memilih sesi
     async function load() {
-      $('#sAktif', el).innerHTML = spinner();
-      const list = await api('sesiAktifSiswa', {}, { silent: true });
+      await swr('sesiAktif', 'sesiAktifSiswa', {}, list => draw(list));
+    }
+    function draw(list) {
+      if (!el.isConnected) return;
       $('#sAktif', el).innerHTML = list.length ? list.map(x =>
         '<div class="card mb-2"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon bg-primary-subtle text-primary"><i class="bi bi-book"></i></div>' +
         '<div class="flex-grow-1"><div class="fw-bold">' + esc(x.mapel) + '</div><div class="small text-muted">' + esc(x.guru) + ' · ' + esc(x.jam_mulai + '–' + x.jam_selesai) + '</div></div>' +
@@ -1211,10 +1285,11 @@ VIEWS.scanQr = {
       '<div id="scanArea"><div id="qrReader" class="bg-dark"></div><p class="text-center text-muted small mt-2" id="scanMsg">Arahkan kamera ke QR Code di layar guru</p>' +
       '<div class="text-center"><label class="btn btn-outline-secondary btn-sm"><i class="bi bi-camera"></i> Kamera tidak muncul? Ambil foto QR<input type="file" accept="image/*" capture="environment" hidden id="qrFile"></label></div></div>';
     bindActs(el, { back: () => navigate('absenSiswa'), again: () => navigate('scanQr'), home: () => navigate('absenSiswa') });
+    const locP = geoIfNeeded(); // GPS dicari bersamaan dengan scan, bukan sesudahnya
     const handle = async txt => {
-      await QRS.stop();
-      $('#scanArea', el).innerHTML = spinner() + '<p class="text-center text-muted">Memverifikasi lokasi & QR…</p>';
-      const loc = await getLocation();
+      QRS.stop();
+      $('#scanArea', el).innerHTML = spinner() + '<p class="text-center text-muted">Mencatat kehadiran…</p>';
+      const loc = await locP;
       try {
         const r = await api('scanQr', { payload: txt, lat: loc.lat, lng: loc.lng, device: navigator.userAgent.substring(0, 140) }, { quiet: true });
         $('#scanArea', el).innerHTML = resultCard(true, 'Absen Berhasil', ['<b>' + esc(r.mapel) + '</b>', 'Status: ' + badge(r.status), 'Pukul ' + esc(r.waktu.substring(11, 16))],
@@ -1242,12 +1317,13 @@ VIEWS.absenWajah = {
     let active = true;
     onLeave(() => { active = false; });
     const video = $('#fv', el), msg = $('#fvMsg', el);
+    const locP = geoIfNeeded();
     try {
-      await Face.load(t => setCamMsg(msg, t));
-      await Face.start(video, 'user');
+      // kamera dinyalakan bersamaan dengan pemuatan model (bukan bergantian)
+      await Promise.all([Face.load(t => setCamMsg(msg, t)), Face.start(video, 'user')]);
       const det = await Face.liveness(video, (t, c) => setCamMsg(msg, t, c), () => active);
-      setCamMsg(msg, 'Memverifikasi wajah & lokasi…', 'info');
-      const loc = await getLocation();
+      setCamMsg(msg, 'Mencocokkan wajah…', 'info');
+      const loc = await locP;
       const r = await api('absenWajah', { sesi_id: p.sesi_id, descriptor: Array.from(det.descriptor), liveness: true, lat: loc.lat, lng: loc.lng, device: navigator.userAgent.substring(0, 140) }, { quiet: true });
       Face.stop();
       $('#fArea', el).innerHTML = resultCard(true, 'Absen Berhasil', ['<b>' + esc(r.mapel) + '</b>', 'Status: ' + badge(r.status), 'Pukul ' + esc(r.waktu.substring(11, 16))], '<button class="btn btn-primary" data-act="home">Selesai</button>');
@@ -1278,21 +1354,21 @@ VIEWS.wajah = {
       '<button class="btn btn-primary w-100 py-2" data-act="start"><i class="bi bi-camera"></i> Mulai Registrasi</button></div>';
     let active = true;
     onLeave(() => { active = false; });
+    Face.preload();
     bindActs(el, {
       again: () => navigate('wajah'), home: () => navigate('dashSiswa'),
       start: async () => {
         $('#rArea', el).innerHTML = camBox('rv') + '<div class="progress mt-3 mx-auto" style="max-width:420px;height:8px"><div class="progress-bar bg-success" id="rBar" style="width:0"></div></div>';
         const video = $('#rv', el), msg = $('#rvMsg', el);
         try {
-          await Face.load(t => setCamMsg(msg, t));
-          await Face.start(video, 'user');
+          await Promise.all([Face.load(t => setCamMsg(msg, t)), Face.start(video, 'user')]);
           const first = await Face.liveness(video, (t, c) => setCamMsg(msg, t, c), () => active);
           const samples = [Array.from(first.descriptor)];
           let tries = 0;
           while (samples.length < 5 && active && tries < 60) {
             tries++;
-            await sleep(350);
-            if ((await Face.countFaces(video)) > 1) { setCamMsg(msg, 'Terdeteksi lebih dari satu wajah!', 'err'); continue; }
+            await sleep(200);
+            if (tries % 4 === 1 && (await Face.countFaces(video)) > 1) { setCamMsg(msg, 'Terdeteksi lebih dari satu wajah!', 'err'); continue; }
             const d = await Face.detect(video);
             if (d && d.detection.score > 0.6) {
               samples.push(Array.from(d.descriptor));
@@ -1590,8 +1666,9 @@ VIEWS.ujianSiswa = {
     el.innerHTML = pageHead('Ujian & Kuis', 'Siapkan HP dengan baterai cukup dan koneksi stabil', '<button class="btn btn-light btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button>') + '<div id="usList">' + spinner() + '</div>';
     let rows = [];
     async function load() {
-      $('#usList', el).innerHTML = spinner();
-      rows = await api('ujianSiswa', {}, { silent: true });
+      await swr('ujianSiswa', 'ujianSiswa', {}, list => {
+      if (!el.isConnected) return;
+      rows = list;
       $('#usList', el).innerHTML = rows.length ? rows.map(u => {
         let btn;
         if (u.sesi_status === 'SELESAI') btn = '<div class="text-end"><div class="small text-muted">Selesai</div>' + (u.tampilkan_nilai ? '<div class="fs-4 fw-bold text-success">' + fmtNum(u.skor) + '</div>' : '<div class="small">Nilai belum ditampilkan</div>') + '</div>';
@@ -1602,6 +1679,7 @@ VIEWS.ujianSiswa = {
           '<div class="flex-grow-1 min-w-0"><div class="fw-bold">' + esc(u.judul) + '</div><div class="small text-muted">' + badge(JENIS_LABEL[u.jenis], 'info') + ' ' + esc(u.mapel) + ' · ' + esc(u.jumlah_soal) + ' soal · ' + esc(u.durasi_menit) + ' menit</div>' +
           '<div class="small text-muted">' + fmtDT(u.tanggal_mulai) + ' – ' + fmtDT(u.tanggal_selesai) + '</div></div>' + btn + '</div></div>';
       }).join('') : emptyState('Belum ada ujian untuk kelasmu.', 'pencil-square');
+      });
     }
     bindActs(el, {
       reload: load,
@@ -2128,7 +2206,9 @@ VIEWS.dashGuru = {
   title: 'Dashboard',
   render: async function (el) {
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini') + spinner();
-    const d = await api('dashboardGuru', {}, { silent: true });
+    bindActs(el, { qr: id => navigate('qrDisplay', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
+    await swr('dashGuru', 'dashboardGuru', {}, d => {
+    if (!el.isConnected) return;
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini',
       '<button class="btn btn-primary btn-sm" data-go="absensiGuru"><i class="bi bi-qr-code"></i> Buka Absensi</button>') +
       '<div class="row g-3 mb-3">' +
@@ -2150,7 +2230,7 @@ VIEWS.dashGuru = {
         { h: '', cls: 'text-end', f: u => actBtn('mon', u.id, 'display', 'Monitoring', 'primary') }
       ], d.ujian_aktif, { empty: 'Tidak ada ujian yang sedang berlangsung' }) + '</div></div></div></div>';
     $$('[data-go]', el).forEach(b => b.onclick = () => navigate(b.dataset.go));
-    bindActs(el, { qr: id => navigate('qrDisplay', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
+    });
   }
 };
 
@@ -2241,11 +2321,10 @@ VIEWS.dashSiswa = {
     el.innerHTML = '<div class="card bg-brand text-white mb-3"><div class="card-body"><div class="small opacity-75">Selamat datang,</div><h5 class="fw-bold mb-0">' + esc(u.nama) + '</h5>' +
       '<div class="small opacity-75">' + esc(u.username) + ' · Kelas ' + esc(u.kelas || '-') + ' · ' + esc(S.settings.semester + ' ' + S.settings.tahun_ajaran) + '</div></div></div>' +
       '<div id="dsBody">' + spinner() + '</div>';
-    const [sesi, ujian, lap] = await Promise.all([
-      api('sesiAktifSiswa', {}, { silent: true }),
-      api('ujianSiswa', {}, { silent: true }),
-      api('laporanSiswa', {}, { silent: true })
-    ]);
+    await swr('beranda', 'berandaSiswa', {}, d => {
+    if (!el.isConnected) return;
+    resetCharts();
+    const sesi = d.sesi, ujian = d.ujian, lap = d;
     const ujAktif = ujian.filter(x => x.fase === 'BERLANGSUNG' && x.sesi_status !== 'SELESAI');
     const belumAbsen = sesi.filter(x => !x.sudah);
     $('#dsBody', el).innerHTML =
@@ -2268,6 +2347,7 @@ VIEWS.dashSiswa = {
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
       });
     }
+    });
   }
 };
 
@@ -2280,7 +2360,9 @@ VIEWS.laporanSiswa = {
       '<ul class="nav nav-pills nav-fill mb-3">' + [['rapor', 'Rapor'], ['nilai', 'Nilai Ujian'], ['hadir', 'Kehadiran']].map(t =>
         '<li class="nav-item"><a href="#" class="nav-link' + (t[0] === tab ? ' active' : '') + '" data-act="tab" data-id="' + t[0] + '">' + t[1] + '</a></li>').join('') + '</ul><div id="lsBody">' + spinner() + '</div>';
     bindActs(el, { tab: t => navigate('laporanSiswa', { tab: t }) });
-    const d = await api('laporanSiswa', {}, { silent: true });
+    await swr('lapSiswa', 'laporanSiswa', {}, d => {
+    if (!el.isConnected) return;
+    resetCharts();
     const box = $('#lsBody', el);
     if (tab === 'rapor') {
       box.innerHTML = '<div class="card"><div class="card-body">' + tableHtml([
@@ -2315,6 +2397,7 @@ VIEWS.laporanSiswa = {
         options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
       });
     }
+    });
   }
 };
 </script>
