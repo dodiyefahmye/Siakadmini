@@ -1418,10 +1418,11 @@ function parseCsv(text) {
   return out;
 }
 
-async function bacaFileTabel(file) {
+async function bacaFileTabel(file, angkaMentah) {
   if (/\.(csv|txt)$/i.test(file.name)) return parseCsv(await file.text());
   await loadScript(XLSX_LIB);
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  // angkaMentah: jam/tanggal dibaca sebagai angka Excel (tepat), bukan objek Date tahun 1899 yang bisa bergeser beberapa menit
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: !angkaMentah });
   const ws = wb.Sheets[wb.SheetNames[0]];
   return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
 }
@@ -2623,7 +2624,7 @@ function imporJadwalDlg(onDone) {
     $('#ijPrev', el).innerHTML = baris.length ? '<b>' + baris.length + ' baris siap diimpor.</b> Contoh: ' + baris.slice(0, 3).map(b => esc(b.kelas + ' ' + b.hari + ' ' + b.jam_mulai + '–' + b.jam_selesai + ' ' + b.mapel)).join(' · ') : '<span class="text-danger">Tidak ada baris terbaca.</span>';
     $('#ijGo', el).disabled = !baris.length;
   };
-  $('#ijFile', el).onchange = async e => { const f = e.target.files[0]; if (!f) return; try { siapkan(await bacaFileTabel(f)); } catch (err) { toast('File tidak dapat dibaca: ' + err.message, 'danger'); } };
+  $('#ijFile', el).onchange = async e => { const f = e.target.files[0]; if (!f) return; try { siapkan(await bacaFileTabel(f, true)); } catch (err) { toast('File tidak dapat dibaca: ' + err.message, 'danger'); } };
   $('#ijText', el).oninput = e => siapkan(parseTSV(e.target.value));
   $('#ijGo', el).onclick = async () => {
     const ganti = $('#ijGanti', el).checked;
@@ -3488,26 +3489,43 @@ VIEWS.laporan = {
   title: 'Laporan',
   render: async function (el, p) {
     await getMaster();
-    const tab = p.tab || 'absensi';
-    const f = Object.assign({ kelas_id: store.get('lapKelas') || '', mapel_id: '', bulan: todayISO().substring(0, 7) }, p.filter || {});
-    const tabs = [['absensi', 'Rekap Absensi Bulanan'], ['nilai', 'Rekap Nilai Kuis/UTS/UAS'], ['terpadu', 'Laporan Terpadu Semester']];
-    el.innerHTML = pageHead('Laporan', 'Absensi, kuis bulanan, dan ujian semester dalam satu tempat') +
+    const u = S.user, admin = u.role === 'admin', bolehHarian = admin || u.piket || (u.wali_kelas || []).length;
+    const tabs = [['absensi', 'Rekap Absensi Bulanan'], ['nilai', 'Rekap Nilai Kuis/UTS/UAS'], ['terpadu', 'Laporan Terpadu Semester']]
+      .concat(bolehHarian ? [['harian', 'Rekap Harian Sekolah']] : []).concat([['keterlaksanaan', admin ? 'Keterlaksanaan Jam Pelajaran' : 'Keterlaksanaan Mengajar Saya']]);
+    const tab = tabs.some(t => t[0] === p.tab) ? p.tab : 'absensi';
+    const awalBulan = todayISO().substring(0, 8) + '01';
+    const f = Object.assign({ kelas_id: store.get('lapKelas') || '', mapel_id: '', bulan: todayISO().substring(0, 7), tanggal: todayISO(), dari: awalBulan, sampai: todayISO() }, p.filter || {});
+    const kol = (label, html, cls) => '<div class="' + (cls || 'col-md-3') + '"><label class="form-label small fw-semibold mb-1">' + label + '</label>' + html + '</div>';
+    const pilihKelas = wajib => kol('Kelas', '<select class="form-select" name="kelas_id"' + (wajib ? ' required' : '') + '>' + optionsHtml(kelasOpts(), f.kelas_id, wajib ? '— pilih kelas —' : 'Semua kelas') + '</select>');
+    const pilihMapel = () => kol('Mata pelajaran', '<select class="form-select" name="mapel_id">' + optionsHtml(mapelOpts(), f.mapel_id, 'Semua mapel') + '</select>');
+    let isi = '';
+    if (tab === 'absensi') isi = pilihKelas(true) + pilihMapel() +
+      kol('Bulan', '<input type="month" class="form-control" name="bulan" value="' + esc(f.bulan) + '" required>', 'col-md-2') +
+      kol('Jenis absen', '<select class="form-select" name="jenis">' + optionsHtml([['', 'Sesuai mode kelas'], ['HARIAN', 'Absen harian'], ['MAPEL', 'Absen per mapel'], ['SEMUA', 'Semua sesi']], f.jenis || '', false) + '</select>', 'col-md-2');
+    else if (tab === 'nilai') isi = pilihKelas(true) + pilihMapel() +
+      kol('Jenis', '<select class="form-select" name="jenis">' + optionsHtml(Object.keys(JENIS_LABEL).map(k => [k, JENIS_LABEL[k]]), f.jenis || '', 'Semua jenis') + '</select>');
+    else if (tab === 'terpadu') isi = pilihKelas(true) + pilihMapel();
+    else if (tab === 'harian') isi = kol('Tanggal', '<input type="date" class="form-control" name="tanggal" value="' + esc(f.tanggal) + '" required>');
+    else isi = kol('Dari', '<input type="date" class="form-control" name="dari" value="' + esc(f.dari) + '" required>', 'col-6 col-md-2') +
+      kol('Sampai', '<input type="date" class="form-control" name="sampai" value="' + esc(f.sampai) + '" required>', 'col-6 col-md-2') +
+      (admin ? kol('Guru', '<select class="form-select" name="guru_id">' + optionsHtml(guruOpts(), f.guru_id || '', 'Semua guru') + '</select>', 'col-md-2') : '') +
+      pilihKelas(false).replace('col-md-3', 'col-md-2') +
+      kol('Tampilan', '<select class="form-select" name="tampilan">' + optionsHtml([['ringkasan', 'Ringkasan per guru'], ['rincian', 'Rincian jam bermasalah'], ['semua', 'Rincian semua jam']], f.tampilan || 'ringkasan', false) + '</select>', 'col-md-2');
+    el.innerHTML = pageHead('Laporan', 'Absensi, kuis bulanan, ujian semester, dan keterlaksanaan jadwal') +
       '<ul class="nav nav-tabs mb-3 no-print">' + tabs.map(t => '<li class="nav-item"><a href="#" class="nav-link' + (t[0] === tab ? ' active' : '') + '" data-act="tab" data-id="' + t[0] + '">' + t[1] + '</a></li>').join('') + '</ul>' +
-      '<div class="card mb-3 no-print"><div class="card-body"><form id="lapF" class="row g-2 align-items-end">' +
-      '<div class="col-md-3"><label class="form-label small fw-semibold mb-1">Kelas</label><select class="form-select" name="kelas_id" required>' + optionsHtml(kelasOpts(), f.kelas_id, '— pilih kelas —') + '</select></div>' +
-      '<div class="col-md-3"><label class="form-label small fw-semibold mb-1">Mata pelajaran</label><select class="form-select" name="mapel_id">' + optionsHtml(mapelOpts(), f.mapel_id, 'Semua mapel') + '</select></div>' +
-      (tab === 'absensi' ? '<div class="col-md-3"><label class="form-label small fw-semibold mb-1">Bulan</label><input type="month" class="form-control" name="bulan" value="' + esc(f.bulan) + '" required></div>' : '') +
-      (tab === 'nilai' ? '<div class="col-md-3"><label class="form-label small fw-semibold mb-1">Jenis</label><select class="form-select" name="jenis">' + optionsHtml(Object.keys(JENIS_LABEL).map(k => [k, JENIS_LABEL[k]]), f.jenis || '', 'Semua jenis') + '</select></div>' : '') +
-      '<div class="col-md-3"><button class="btn btn-primary w-100"><i class="bi bi-search"></i> Tampilkan</button></div></form></div></div>' +
-      '<div id="lapOut">' + emptyState('Pilih kelas lalu klik Tampilkan', 'bar-chart') + '</div>';
+      '<div class="card mb-3 no-print"><div class="card-body"><form id="lapF" class="row g-2 align-items-end">' + isi +
+      '<div class="col-md-2"><button class="btn btn-primary w-100"><i class="bi bi-search"></i> Tampilkan</button></div></form></div></div>' +
+      '<div id="lapOut">' + emptyState(['harian', 'keterlaksanaan'].indexOf(tab) >= 0 ? 'Memuat…' : 'Pilih kelas lalu klik Tampilkan', 'bar-chart') + '</div>';
     const form = $('#lapF', el);
-    const fnName = { absensi: 'rekapAbsensi', nilai: 'rekapNilai', terpadu: 'laporanTerpadu' }[tab];
+    const fnName = { absensi: 'rekapAbsensi', nilai: 'rekapNilai', terpadu: 'laporanTerpadu', harian: 'rekapHarianSekolah', keterlaksanaan: 'keterlaksanaan' }[tab];
     let last = null, params = null;
     async function show() {
       params = readForm(form);
-      store.set('lapKelas', params.kelas_id);
+      if (params.kelas_id && ['absensi', 'nilai', 'terpadu'].indexOf(tab) >= 0) store.set('lapKelas', params.kelas_id);
+      const kirim = Object.assign({}, params);
+      if (tab === 'keterlaksanaan') { kirim.semua_status = params.tampilan === 'semua'; if (params.tampilan === 'semua') kirim.tampilan = 'rincian'; }
       $('#lapOut', el).innerHTML = spinner();
-      last = await api(fnName, params, { silent: true });
+      last = await api(fnName, kirim, { silent: true });
       renderReport($('#lapOut', el), last, tab);
     }
     form.onsubmit = e => { e.preventDefault(); show().catch(() => { $('#lapOut', el).innerHTML = ''; }); };
@@ -3517,7 +3535,7 @@ VIEWS.laporan = {
       csv: () => last && downloadCsv(last.judul, last.headers.map(h => String(h).replace(/\n/g, ' ')), last.rows),
       print: () => window.print()
     });
-    if (f.kelas_id) show().catch(() => { $('#lapOut', el).innerHTML = ''; });
+    if (f.kelas_id || tab === 'harian' || tab === 'keterlaksanaan') show().catch(() => { $('#lapOut', el).innerHTML = ''; });
   }
 };
 
@@ -3623,7 +3641,10 @@ function renderReport(box, r, tab) {
       r.rows.map(row => '<tr>' + row.map((c, i) => {
         const cls = isMatrix && i >= (r.cell_start || 3) && i < row.length - 6 && 'HTISA'.indexOf(c) >= 0 && c ? 'st-' + c : '';
         const isPred = tab === 'terpadu' && i === row.length - 1;
-        return '<td class="' + cls + '">' + (isPred && c !== '-' ? badge(c, { A: 'success', B: 'primary', C: 'info', D: 'warning', E: 'danger' }[c]) : esc(c)) + '</td>';
+        const isBadge = r.badge_col === i && c;
+        return '<td class="' + cls + (String(row[1]).indexOf('TOTAL') === 0 ? ' fw-bold table-light' : '') + '">' +
+          (isPred && c !== '-' ? badge(c, { A: 'success', B: 'primary', C: 'info', D: 'warning', E: 'danger' }[c])
+            : isBadge ? badge(c, { 'Tidak dibuka': 'danger', 'Digantikan': 'warning', 'Terlaksana': 'success' }[c] || 'secondary') : esc(c)) + '</td>';
       }).join('') + '</tr>').join('') + '</tbody></table></div>' : emptyState('Tidak ada data untuk filter ini')) +
     '</div></div>';
   const cv = box.querySelector('canvas');
