@@ -141,14 +141,17 @@
   .k-head-t { line-height:1.15; min-width:0; }
   .k-sek { font-size:2.6mm; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70mm; }
   .k-jud { font-size:2.2mm; letter-spacing:0.3mm; opacity:.9; }
-  .k-body { flex:1; display:flex; align-items:center; gap:2mm; padding:1.5mm 3mm; }
+  .k-body { flex:1; display:flex; align-items:center; gap:2mm; padding:1.5mm 2.5mm; min-height:0; }
+  .k-foto { width:21mm; height:28mm; flex:0 0 21mm; object-fit:cover; border-radius:1.2mm; border:0.3mm solid #cbd5e1; background:#f1f5f9; }
   .k-info { flex:1; min-width:0; }
-  .k-nama { font-size:3.4mm; font-weight:bold; line-height:1.15; margin-bottom:1.2mm; max-height:8mm; overflow:hidden; }
-  .k-info table { font-size:2.5mm; border-collapse:collapse; }
-  .k-info td { padding:0.2mm 1mm 0.2mm 0; white-space:nowrap; }
-  .k-qr { width:31mm; height:31mm; flex:0 0 31mm; }
+  .k-nama { font-size:3mm; font-weight:bold; line-height:1.15; margin-bottom:1mm; max-height:7mm; overflow:hidden; }
+  .k-info table { font-size:2.2mm; border-collapse:collapse; table-layout:fixed; width:100%; }
+  .k-info td { padding:0.2mm 0.8mm 0.2mm 0; vertical-align:top; line-height:1.2; }
+  .k-info td:first-child { width:8mm; white-space:nowrap; }
+  .k-info td:last-child { word-break:break-word; }
+  .k-qr { width:25mm; height:25mm; flex:0 0 25mm; }
   .k-qr img { display:none !important; }
-  .k-qr canvas { display:block !important; width:31mm !important; height:31mm !important; }
+  .k-qr canvas { display:block !important; width:25mm !important; height:25mm !important; }
   .k-foot { font-size:1.9mm; color:#64748b; text-align:center; padding:0.8mm 2mm 1.2mm; border-top:0.2mm solid #e2e8f0; }
 
   @media print {
@@ -803,7 +806,8 @@ VIEWS.users = {
     await getMaster(true);
     let role = 'siswa', rows = [], q = '', kelas = '';
     el.innerHTML = pageHead('Manajemen Pengguna', 'Akun siswa, guru, dan admin. Password awal akun baru = username.',
-      '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu QR</button>' +
+      '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu</button>' +
+      '<button class="btn btn-outline-success btn-sm" data-act="fotoMassal"><i class="bi bi-images"></i> Unggah Foto</button>' +
       '<button class="btn btn-outline-success btn-sm" data-act="dapodik"><i class="bi bi-file-earmark-excel"></i> Import Dapodik</button>' +
       '<button class="btn btn-outline-primary btn-sm" data-act="import"><i class="bi bi-clipboard"></i> Tempel</button>' +
       '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Tambah</button>') +
@@ -831,6 +835,7 @@ VIEWS.users = {
       ];
       if (role === 'siswa') {
         cols.push({ h: 'Kelas', f: u => esc(u.kelas || '-') });
+        cols.push({ h: 'Foto', cls: 'text-center', f: u => u.foto ? '<i class="bi bi-person-square text-success" title="Sudah ada pas foto"></i>' : '<span class="text-muted small" title="Kartu memakai foto pengganti">–</span>' });
         cols.push({ h: 'Wajah', f: u => u.face === 'TERDAFTAR' ? badge('Terdaftar', 'success') : u.face === 'RESET' ? badge('Boleh daftar ulang', 'warning') : badge('Belum', 'light') });
       }
       cols.push({ h: 'Status', f: u => badge(u.status) });
@@ -846,10 +851,16 @@ VIEWS.users = {
       await getMaster(); // daftar kelas terbaru (mis. setelah import membuat kelas baru)
       if (u.id) {
         const p = await api('getProfil', { user_id: u.id });
-        ['jenis_kelamin', 'nisn', 'nip', 'tempat_lahir', 'tanggal_lahir', 'alamat', 'no_telepon', 'nama_wali', 'telepon_wali'].forEach(k => u[k] = p[k]);
+        ['jenis_kelamin', 'nisn', 'nip', 'tempat_lahir', 'tanggal_lahir', 'alamat', 'no_telepon', 'nama_wali', 'telepon_wali', 'foto'].forEach(k => u[k] = p[k]);
       }
+      const fotoBox = u.id && u.role === 'siswa' ? '<div class="d-flex align-items-center gap-3 mb-3 p-2 border rounded bg-light">' +
+        '<img id="ufFoto" src="' + esc(fotoSrc(u.foto, u.jenis_kelamin)) + '" alt="" class="rounded border bg-white" style="width:72px;height:96px;object-fit:cover">' +
+        '<div><div class="small fw-semibold mb-1">Pas foto (kartu pelajar)</div><div class="small text-muted mb-2" id="ufFotoKet">' + (u.foto ? 'Sudah ada foto.' : 'Belum ada — kartu memakai foto pengganti.') + '</div>' +
+        '<label class="btn btn-sm btn-primary mb-0"><i class="bi bi-upload"></i> Pilih foto…<input type="file" accept="image/*" hidden id="ufFotoFile"></label> ' +
+        '<button type="button" class="btn btn-sm btn-outline-danger" id="ufFotoDel"' + (u.foto ? '' : ' disabled') + '><i class="bi bi-trash"></i> Hapus</button></div></div>' : '';
       formModal({ size: 'lg',
         title: u.id ? 'Ubah Pengguna' : 'Tambah Pengguna',
+        intro: fotoBox,
         values: u,
         fields: [
           { name: 'id', type: 'hidden' },
@@ -863,6 +874,19 @@ VIEWS.users = {
         onRender: form => {
           const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); toggleBiodata(form, form.role.value); };
           form.role.onchange = t; t();
+          const fi = $('#ufFotoFile');
+          if (fi) {
+            const setFoto = async src => {
+              await api('saveFoto', { user_id: u.id, foto: src });
+              $('#ufFoto').src = fotoSrc(src, form.jenis_kelamin ? form.jenis_kelamin.value : u.jenis_kelamin);
+              $('#ufFotoKet').textContent = src ? 'Foto tersimpan.' : 'Foto dihapus — kartu memakai foto pengganti.';
+              $('#ufFotoDel').disabled = !src;
+              const row = rows.find(x => x.id === u.id); if (row) { row.foto = !!src; draw(); }
+            };
+            fi.onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+              try { await setFoto(await fotoDariFile(f)); toast('Foto disimpan', 'success'); } catch (err) { if (!err.code) toast(err.message, 'danger'); } };
+            $('#ufFotoDel').onclick = async () => { try { await setFoto(''); } catch (err) { } };
+          }
         },
         onSubmit: async d => { delete d._bio; await api('saveUser', d); toast('Data pengguna disimpan', 'success'); S.master = null; load(); }
       });
@@ -918,6 +942,7 @@ VIEWS.users = {
       import: importDlg,
       dapodik: () => importDapodikDlg(refreshKelas),
       cetakKartu: () => cetakKartuDlg(kelas),
+      fotoMassal: () => fotoMassalDlg(load),
       kartu: id => kartuSiswaDlg(rows.find(x => x.id === id))
     });
     $('#uq', el).oninput = e => { q = e.target.value.toLowerCase(); draw(); };
@@ -1084,6 +1109,45 @@ const AKSI_LABEL = {
   deleteUjian: 'Hapus ujian', setStatusUjian: 'Ubah status ujian', unlockSesiUjian: 'Buka kunci ujian siswa', resetSesiUjian: 'Reset ujian siswa',
   addTimeUjian: 'Tambah waktu ujian', nilaiEsai: 'Nilai esai'
 };
+/** Unggah banyak pas foto sekaligus: nama file = NIS atau NISN (mis. 1001.jpg) */
+function fotoMassalDlg(onDone) {
+  const el = modal({
+    title: 'Unggah Pas Foto Siswa', size: 'lg',
+    body: '<ol class="small mb-3 ps-3"><li>Beri nama setiap file foto dengan <b>NIS</b> atau <b>NISN</b> siswa, mis. <code>1001.jpg</code> atau <code>0091234567.png</code>.</li>' +
+      '<li>Pilih banyak file sekaligus (bisa satu kelas). Foto otomatis dipotong rasio 3×4 dan diperkecil.</li>' +
+      '<li>Foto lama siswa yang sama akan diganti. Siswa tanpa foto memakai foto pengganti di kartu.</li></ol>' +
+      '<input type="file" class="form-control mb-2" id="fmFile" accept="image/*" multiple>' +
+      '<div class="progress mb-2 d-none" id="fmProg" style="height:8px"><div class="progress-bar bg-success" style="width:0"></div></div><div id="fmRes" class="small"></div>',
+    footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button><button class="btn btn-primary" id="fmGo" disabled><i class="bi bi-upload"></i> Unggah</button>'
+  });
+  const inp = $('#fmFile', el), go = $('#fmGo', el), res = $('#fmRes', el), bar = $('#fmProg', el);
+  inp.onchange = () => { go.disabled = !inp.files.length; res.textContent = inp.files.length ? inp.files.length + ' file dipilih' : ''; };
+  go.onclick = async () => {
+    const files = Array.from(inp.files); if (!files.length) return;
+    go.disabled = true; inp.disabled = true; bar.classList.remove('d-none');
+    const ok = [], gagal = []; let batch = [], selesai = 0;
+    const kirim = async () => {
+      if (!batch.length) return;
+      try { const r = await api('importFoto', { items: batch }, { silent: true }); ok.push(...r.berhasil); gagal.push(...r.gagal); }
+      catch (e) { batch.forEach(b => gagal.push({ kunci: b.kunci, alasan: e.message })); }
+      batch = [];
+    };
+    for (const f of files) {
+      const kunci = f.name.replace(/\.[^.]+$/, '').trim();
+      try { batch.push({ kunci, foto: await fotoDariFile(f) }); } catch (e) { gagal.push({ kunci: f.name, alasan: e.message }); }
+      if (batch.length >= 10) await kirim();
+      selesai++; bar.firstChild.style.width = (selesai / files.length * 100) + '%';
+      res.textContent = 'Memproses ' + selesai + ' / ' + files.length + '…';
+    }
+    await kirim();
+    res.innerHTML = '<div class="alert alert-success py-2 mb-2">' + ok.length + ' foto tersimpan.</div>' +
+      (gagal.length ? '<div class="alert alert-warning py-2" style="max-height:180px;overflow:auto"><b>' + gagal.length + ' tidak tersimpan:</b><br>' +
+        gagal.map(g => esc(g.kunci) + ' — ' + esc(g.alasan)).join('<br>') + '</div>' : '');
+    inp.disabled = false; inp.value = ''; bar.classList.add('d-none');
+    if (onDone) onDone();
+  };
+}
+
 /** Memperkecil gambar logo (maks 256 px, PNG; JPEG bila hasilnya terlalu besar) */
 function kecilkanLogo(file) {
   return new Promise((ok, no) => {
@@ -1160,6 +1224,38 @@ function toggleBiodata(form, role) {
 }
 
 /** Kartu biodata (dipakai guru/wali kelas, mis. dari daftar hadir) */
+/* ---------------- FOTO PROFIL ---------------- */
+/** Foto pengganti (siluet) untuk siswa yang belum punya pas foto */
+function fotoDummy(jk) {
+  const bg = jk === 'P' ? '#fce7f3' : jk === 'L' ? '#dbeafe' : '#e2e8f0', fg = jk === 'P' ? '#f9a8d4' : jk === 'L' ? '#93c5fd' : '#94a3b8';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 75 100"><rect width="75" height="100" fill="' + bg + '"/>' +
+    '<circle cx="37.5" cy="40" r="17" fill="' + fg + '"/><path d="M8 100c0-21 13-35 29.5-35S67 79 67 100z" fill="' + fg + '"/></svg>';
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+function fotoSrc(foto, jk) { return foto || fotoDummy(jk); }
+
+/** Pas foto dari file: dipotong di tengah ke rasio 3×4, diperkecil 300×400, JPEG ±25–40 KB */
+function fotoDariFile(file) {
+  return new Promise((ok, no) => {
+    if (!/^image\//.test(file.type)) return no(new Error(file.name + ': bukan file gambar'));
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onerror = () => { URL.revokeObjectURL(url); no(new Error(file.name + ': gambar tidak dapat dibaca')); };
+    im.onload = () => {
+      URL.revokeObjectURL(url);
+      const W = 300, H = 400, r = W / H;
+      let sw = im.width, sh = im.height, sx = 0, sy = 0;
+      if (sw / sh > r) { sw = sh * r; sx = (im.width - sw) / 2; } else { sh = sw / r; sy = Math.max(0, (im.height - sh) * 0.3); } // potret: sisakan bagian kepala
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+      g.drawImage(im, sx, sy, sw, sh, 0, 0, W, H);
+      let d = c.toDataURL('image/jpeg', 0.85);
+      if (d.length > 280000) d = c.toDataURL('image/jpeg', 0.6);
+      ok(d);
+    };
+    im.src = url;
+  });
+}
+
 async function showBiodata(userId) {
   const p = await api('getProfil', { user_id: userId });
   const row = (k, v, extra) => '<tr><th class="text-muted fw-normal small" style="width:40%">' + k + '</th><td>' + (v ? esc(v) : '<span class="text-muted">-</span>') + (extra || '') + '</td></tr>';
@@ -1167,7 +1263,9 @@ async function showBiodata(userId) {
     ' <a class="btn btn-sm btn-outline-primary py-0" href="tel:' + esc(t) + '"><i class="bi bi-telephone"></i></a>' : '';
   modal({
     title: 'Biodata: ' + p.nama,
-    body: '<table class="table table-sm mb-0">' +
+    body: (p.role === 'siswa' ? '<div class="text-center mb-3"><img src="' + esc(fotoSrc(p.foto, p.jenis_kelamin)) + '" alt="" class="rounded border" style="width:105px;height:140px;object-fit:cover">' +
+      (p.foto ? '' : '<div class="small text-muted mt-1">Belum ada pas foto</div>') + '</div>' : '') +
+      '<table class="table table-sm mb-0">' +
       row('Username / NIS', p.username) + (p.nisn ? row('NISN', p.nisn) : '') + (p.nip ? row('NIP', p.nip) : '') +
       row('Kelas', p.kelas) + row('Jenis kelamin', JK_LABEL[p.jenis_kelamin] || '') +
       row('Tempat, tanggal lahir', [p.tempat_lahir, p.tanggal_lahir ? fmtDT(p.tanggal_lahir, false) : ''].filter(Boolean).join(', ')) +
@@ -1187,7 +1285,10 @@ VIEWS.profil = {
     const ro = (k, v) => '<div class="col-6 col-md-4 mb-2"><div class="small text-muted">' + k + '</div><div class="fw-semibold">' + (v ? esc(v) : '-') + '</div></div>';
     const siswa = p.role === 'siswa';
     el.innerHTML = pageHead('Profil Saya', 'Periksa biodata Anda. Data yang salah selain kontak dapat diperbaiki oleh admin.') +
-      '<div class="card mb-3"><div class="card-body"><div class="row">' +
+      '<div class="card mb-3"><div class="card-body d-flex gap-3 align-items-start">' +
+      (siswa ? '<div class="text-center flex-shrink-0"><img src="' + esc(fotoSrc(p.foto, p.jenis_kelamin)) + '" alt="" class="rounded border" style="width:90px;height:120px;object-fit:cover">' +
+        (p.foto ? '' : '<div class="small text-muted" style="max-width:90px">Foto diunggah admin</div>') + '</div>' : '') +
+      '<div class="row flex-grow-1">' +
       ro('Nama', p.nama) + ro(siswa ? 'NIS / Username' : 'Username', p.username) + (siswa ? ro('Kelas', p.kelas) : ro('NIP', p.nip)) +
       ro('Jenis kelamin', JK_LABEL[p.jenis_kelamin]) + ro('Tempat, tgl lahir', [p.tempat_lahir, p.tanggal_lahir ? fmtDT(p.tanggal_lahir, false) : ''].filter(Boolean).join(', ')) +
       ro('Umur', p.umur) + (siswa && p.nisn ? ro('NISN', p.nisn) : '') +
@@ -2001,10 +2102,12 @@ function cetakKartu(data) {
   if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
   area.innerHTML = '<div class="kartu-sheet">' + data.kartu.map((c, i) =>
     '<div class="kartu">' +
-    '<div class="k-head">' + LOGO.html() + '<div class="k-head-t"><div class="k-sek">' + esc(data.sekolah || '') + '</div><div class="k-jud">KARTU ABSENSI SISWA</div></div></div>' +
-    '<div class="k-body"><div class="k-info"><div class="k-nama">' + esc(c.nama) + '</div>' +
-    '<table><tr><td>NISN</td><td>: ' + esc(c.nisn) + '</td></tr><tr><td>Kelas</td><td>: ' + esc(c.kelas) + '</td></tr>' +
-    (c.jk ? '<tr><td>L/P</td><td>: ' + esc(c.jk) + '</td></tr>' : '') + '</table></div>' +
+    '<div class="k-head">' + LOGO.html() + '<div class="k-head-t"><div class="k-sek">' + esc(data.sekolah || '') + '</div><div class="k-jud">KARTU PELAJAR</div></div></div>' +
+    '<div class="k-body"><img class="k-foto" src="' + esc(fotoSrc(c.foto, c.jk)) + '" alt="">' +
+    '<div class="k-info"><div class="k-nama">' + esc(c.nama) + '</div>' +
+    '<table><tr><td>NISN</td><td>: ' + esc(c.nisn) + '</td></tr><tr><td>Kelas</td><td>: ' + esc(c.kelas) + (c.jk ? ' (' + esc(c.jk) + ')' : '') + '</td></tr>' +
+    (c.tempat_lahir || c.tanggal_lahir ? '<tr><td>TTL</td><td>: ' + esc(c.tempat_lahir) + (c.tempat_lahir && c.tanggal_lahir ? ', ' : '') +
+      '<span style="white-space:nowrap">' + esc(c.tanggal_lahir) + '</span></td></tr>' : '') + '</table></div>' +
     '<div class="k-qr" id="kqr' + i + '"></div></div>' +
     '<div class="k-foot">Pindai di depan guru · TA ' + esc(data.tahun_ajaran || '') + (c.versi > 1 ? ' · cetakan ke-' + c.versi : '') + '</div>' +
     '</div>').join('') + '</div>';
@@ -2091,11 +2194,13 @@ VIEWS.scanKartu = {
     let lastCode = '', lastAt = 0, busy = false, camOn = false; const antre = [];
     const presisi = window.matchMedia && matchMedia('(pointer:fine)').matches; // laptop/PC: kotak input selalu fokus untuk scanner USB
     if (presisi) input.focus();
-    const flash = (jenis, judul, sub) => {
+    const flash = (jenis, judul, sub, foto) => {
       const warna = { ok: 'success', sudah: 'primary', err: 'danger' }[jenis];
       const ikon = { ok: 'check-circle-fill', sudah: 'info-circle-fill', err: 'x-circle-fill' }[jenis];
-      $('#skFlash', el).outerHTML = '<div id="skFlash" class="card mb-3 border-0 text-bg-' + warna + '"><div class="card-body text-center py-4">' +
-        '<i class="bi bi-' + ikon + '" style="font-size:3rem"></i><div class="fs-3 fw-bold mt-1">' + esc(judul) + '</div><div class="fs-6">' + esc(sub || '') + '</div></div></div>';
+      $('#skFlash', el).outerHTML = '<div id="skFlash" class="card mb-3 border-0 text-bg-' + warna + '"><div class="card-body py-3 d-flex align-items-center justify-content-center gap-3">' +
+        (foto !== undefined ? '<img src="' + esc(foto) + '" alt="" class="rounded bg-white" style="width:96px;height:128px;object-fit:cover;border:3px solid #fff">' : '') +
+        '<div class="text-center"><i class="bi bi-' + ikon + '" style="font-size:2.6rem"></i><div class="fs-3 fw-bold mt-1">' + esc(judul) + '</div><div class="fs-6">' + esc(sub || '') + '</div>' +
+        (foto !== undefined ? '<div class="small opacity-75 mt-1">Cocokkan foto dengan wajah siswa</div>' : '') + '</div></div></div>';
     };
     const log = html => {
       const l = $('#skLog', el); if (l.querySelector('.text-muted.p-2')) l.innerHTML = '';
@@ -2110,9 +2215,9 @@ VIEWS.scanKartu = {
       busy = true;
       try {
         const r = await api('scanKartu', { sesi_id: p.id, kode: kode }, { silent: true, quiet: true });
-        if (r.sudah) { flash('sudah', r.nama, 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
+        if (r.sudah) { flash('sudah', r.nama, 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
         else {
-          flash('ok', r.nama, r.status + ' · ' + r.waktu.substring(11, 16)); bip(true);
+          flash('ok', r.nama, r.status + ' · ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true);
           hadir = r.hadir; $('#skHadir', el).textContent = hadir;
           log('<i class="bi bi-check-circle text-success"></i> <b>' + esc(r.nama) + '</b> — ' + esc(r.status));
         }
