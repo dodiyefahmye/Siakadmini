@@ -122,7 +122,32 @@
   .exam-overlay .big { font-size:4rem; line-height:1; margin-bottom:12px; }
   .save-ind { font-size:.75rem; opacity:.9; }
 
+  /* ======== KARTU QR SISWA (ID card 85,6 × 54 mm) ======== */
+  #printArea { display:none; }
+  .kartu-sheet { display:grid; grid-template-columns:85.6mm 85.6mm; column-gap:6mm; row-gap:3mm; justify-content:center; }
+  .kartu { width:85.6mm; height:54mm; box-sizing:border-box; outline:0.25mm dashed #9ca3af; outline-offset:1mm; border-radius:3mm; overflow:hidden;
+    background:#fff; border:0.3mm solid #cbd5e1; display:flex; flex-direction:column; page-break-inside:avoid; break-inside:avoid;
+    font-family:Arial, Helvetica, sans-serif; color:#0f172a; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .k-head { background:linear-gradient(90deg,#1e3a8a,#2563eb); color:#fff; display:flex; align-items:center; gap:2mm; padding:1.6mm 3mm; height:11mm; box-sizing:border-box; }
+  .k-head i { font-size:5mm; }
+  .k-head-t { line-height:1.15; min-width:0; }
+  .k-sek { font-size:2.6mm; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70mm; }
+  .k-jud { font-size:2.2mm; letter-spacing:0.3mm; opacity:.9; }
+  .k-body { flex:1; display:flex; align-items:center; gap:2mm; padding:1.5mm 3mm; }
+  .k-info { flex:1; min-width:0; }
+  .k-nama { font-size:3.4mm; font-weight:bold; line-height:1.15; margin-bottom:1.2mm; max-height:8mm; overflow:hidden; }
+  .k-info table { font-size:2.5mm; border-collapse:collapse; }
+  .k-info td { padding:0.2mm 1mm 0.2mm 0; white-space:nowrap; }
+  .k-qr { width:31mm; height:31mm; flex:0 0 31mm; }
+  .k-qr img { display:none !important; }
+  .k-qr canvas { display:block !important; width:31mm !important; height:31mm !important; }
+  .k-foot { font-size:1.9mm; color:#64748b; text-align:center; padding:0.8mm 2mm 1.2mm; border-top:0.2mm solid #e2e8f0; }
+
   @media print {
+    @page { size:A4 portrait; margin:6mm 8mm; }
+    body.cetak-kartu > *:not(#printArea) { display:none !important; }
+    body.cetak-kartu #printArea { display:block !important; }
+    body.cetak-kartu { background:#fff !important; padding:0 !important; }
     .no-print, .app-chrome, .bottom-nav, .sidebar, nav { display:none !important; }
     body { background:#fff; padding:0 !important; }
     main { padding:0 !important; }
@@ -725,6 +750,7 @@ VIEWS.users = {
     await getMaster(true);
     let role = 'siswa', rows = [], q = '', kelas = '';
     el.innerHTML = pageHead('Manajemen Pengguna', 'Akun siswa, guru, dan admin. Password awal akun baru = username.',
+      '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu QR</button>' +
       '<button class="btn btn-outline-success btn-sm" data-act="dapodik"><i class="bi bi-file-earmark-excel"></i> Import Dapodik</button>' +
       '<button class="btn btn-outline-primary btn-sm" data-act="import"><i class="bi bi-clipboard"></i> Tempel</button>' +
       '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Tambah</button>') +
@@ -756,6 +782,7 @@ VIEWS.users = {
       }
       cols.push({ h: 'Status', f: u => badge(u.status) });
       cols.push({ h: '', cls: 'text-end text-nowrap', f: u =>
+        (role === 'siswa' ? actBtn('kartu', u.id, 'person-badge', 'Kartu QR (cetak / ganti jika hilang)', 'outline-success') + ' ' : '') +
         (role === 'siswa' && u.face === 'TERDAFTAR' ? actBtn('face', u.id, 'person-bounding-box', 'Izinkan daftar ulang wajah') + ' ' : '') +
         (role === 'siswa' && u.face !== 'BELUM' ? actBtn('delFace', u.id, 'person-x', 'Hapus data wajah', 'outline-warning') + ' ' : '') +
         actBtn('edit', u.id, 'pencil', 'Ubah') + ' ' + actBtn('del', u.id, 'trash', 'Hapus', 'outline-danger') });
@@ -836,7 +863,9 @@ VIEWS.users = {
         await api('resetFace', { user_id: id }); toast('Siswa dapat mendaftar ulang wajah', 'success'); load();
       },
       import: importDlg,
-      dapodik: () => importDapodikDlg(refreshKelas)
+      dapodik: () => importDapodikDlg(refreshKelas),
+      cetakKartu: () => cetakKartuDlg(kelas),
+      kartu: id => kartuSiswaDlg(rows.find(x => x.id === id))
     });
     $('#uq', el).oninput = e => { q = e.target.value.toLowerCase(); draw(); };
     $('#uk', el).onchange = e => { kelas = e.target.value; draw(); };
@@ -1428,6 +1457,7 @@ VIEWS.absensiGuru = {
     await getMaster();
     let tgl = todayISO();
     el.innerHTML = pageHead('Sesi Absensi', 'Buka sesi, tampilkan QR di layar/proyektor, atau gunakan mode kiosk wajah',
+      '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu QR</button>' +
       '<button class="btn btn-outline-primary btn-sm" data-act="kiosk"><i class="bi bi-person-bounding-box"></i> Mode Kiosk</button>' +
       '<button class="btn btn-primary btn-sm" data-act="open"><i class="bi bi-plus-lg"></i> Buka Sesi</button>') +
       '<div class="card"><div class="card-body"><div class="row g-2 mb-3"><div class="col-auto"><input type="date" class="form-control" id="fTgl" value="' + tgl + '"></div>' +
@@ -1440,11 +1470,12 @@ VIEWS.absensiGuru = {
       $('#sList', el).innerHTML = tableHtml([
         { h: 'Tanggal', f: r => fmtDT(r.tanggal, false) + '<div class="small text-muted">' + esc(r.jam_mulai + '–' + r.jam_selesai) + '</div>' },
         { h: 'Kelas / Mapel', f: r => '<b>' + esc(r.kelas) + '</b><div class="small text-muted">' + esc(r.mapel) + (S.user.role === 'admin' ? ' · ' + esc(r.guru) : '') + '</div>' },
-        { h: 'Metode', f: r => badge(r.metode === 'KEDUANYA' ? 'QR + Wajah' : r.metode === 'FACE' ? 'Wajah' : 'QR', 'light') },
+        { h: 'Metode', f: r => badge(METODE_LABEL[r.metode] || r.metode, 'light') },
         { h: 'Hadir', f: r => '<b>' + r.hadir + '</b>/' + r.jumlah_siswa },
         { h: 'Status', f: r => badge(r.status) },
-        { h: '', cls: 'text-end text-nowrap', f: r => (r.status === 'AKTIF' ? (r.metode !== 'FACE' ? actBtn('qr', r.id, 'qr-code', 'Tampilkan QR', 'primary') + ' ' : '') +
-            (r.metode !== 'QR' ? actBtn('kioskId', r.id, 'person-bounding-box', 'Kiosk wajah', 'outline-primary') + ' ' : '') : '') +
+        { h: '', cls: 'text-end text-nowrap', f: r => (r.status === 'AKTIF' ? (metodeBoleh(r.metode, 'QR') ? actBtn('qr', r.id, 'qr-code', 'Tampilkan QR', 'primary') + ' ' : '') +
+            (metodeBoleh(r.metode, 'KARTU') ? actBtn('kartu', r.id, 'upc-scan', 'Scan kartu siswa', 'outline-success') + ' ' : '') +
+            (metodeBoleh(r.metode, 'FACE') ? actBtn('kioskId', r.id, 'person-bounding-box', 'Kiosk wajah', 'outline-primary') + ' ' : '') : '') +
           actBtn('detail', r.id, 'list-check', 'Daftar hadir') + ' ' + (r.status === 'AKTIF' || r.status === 'BERAKHIR' ? actBtn('close', r.id, 'stop-circle', 'Tutup sesi', 'outline-danger') + ' ' : '') +
           actBtn('hapus', r.id, 'trash', 'Hapus sesi (mis. salah buka / uji coba)', 'outline-danger') }
       ], rows, { empty: 'Belum ada sesi absensi' + (tgl ? ' pada tanggal ini' : '') });
@@ -1454,22 +1485,25 @@ VIEWS.absensiGuru = {
       all: () => { tgl = ''; $('#fTgl', el).value = ''; load(); },
       open: () => formModal({
         title: 'Buka Sesi Absensi',
-        values: { durasi_menit: 60, metode: 'QR' },
+        values: { durasi_menit: 60, metode: 'QR_KARTU' },
         fields: [
           { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), required: true, col: 'col-md-6' },
           { name: 'mapel_id', label: 'Mata pelajaran', type: 'select', options: mapelOpts(), required: true, col: 'col-md-6' },
           { name: 'durasi_menit', label: 'Lama sesi dibuka (menit)', type: 'number', min: 5, max: 600, required: true, col: 'col-md-6' },
-          { name: 'metode', label: 'Metode absensi', type: 'select', placeholder: false, col: 'col-md-6', options: [['QR', 'QR Code dinamis'], ['FACE', 'Wajah (face recognition)'], ['KEDUANYA', 'QR atau Wajah']] }
+          { name: 'metode', label: 'Metode absensi', type: 'select', placeholder: false, col: 'col-md-6', options: METODE_OPSI,
+            help: 'Siswa tanpa HP memakai Kartu QR yang dipindai guru' }
         ],
         submitText: 'Buka Sesi',
         onSubmit: async d => {
           const r = await api('openSesi', d);
           toast('Sesi absensi dibuka', 'success');
-          later(() => navigate(r.metode === 'FACE' ? 'kiosk' : 'qrDisplay', { id: r.id }), 350);
+          later(() => navigate(r.metode === 'FACE' ? 'kiosk' : r.metode === 'KARTU' ? 'scanKartu' : 'qrDisplay', { id: r.id }), 350);
         }
       }),
       qr: id => navigate('qrDisplay', { id }),
       kioskId: id => navigate('kiosk', { id }),
+      kartu: id => navigate('scanKartu', { id }),
+      cetakKartu: () => cetakKartuDlg(),
       kiosk: () => navigate('kiosk'),
       detail: id => navigate('detailSesi', { id }),
       hapus: async id => {
@@ -1493,6 +1527,7 @@ VIEWS.qrDisplay = {
   render: async function (el, p) {
     el.innerHTML = '<div class="d-flex flex-wrap justify-content-between gap-2 mb-3 no-print"><button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>' +
       '<div class="d-flex gap-2 flex-wrap"><button class="btn btn-outline-primary btn-sm" data-act="fs"><i class="bi bi-arrows-fullscreen"></i> Layar penuh</button>' +
+      '<button class="btn btn-success btn-sm d-none" data-act="kartu" id="qrKartuBtn"><i class="bi bi-upc-scan"></i> Scan Kartu</button>' +
       '<button class="btn btn-outline-secondary btn-sm" data-act="detail"><i class="bi bi-list-check"></i> Daftar hadir</button>' +
       '<button class="btn btn-danger btn-sm" data-act="close"><i class="bi bi-stop-circle"></i> Tutup sesi</button></div></div>' +
       '<div class="card qr-card" id="qrCard"><div class="card-body text-center py-4">' +
@@ -1512,6 +1547,7 @@ VIEWS.qrDisplay = {
         $('#qrTitle', el).textContent = r.kelas + ' · ' + r.mapel;
         $('#qrSub', el).textContent = 'Sesi ' + r.jam + ' · Buka aplikasi di HP → menu Absen → Scan QR';
         $('#qrHadir', el).textContent = r.hadir; $('#qrTotal', el).textContent = r.total;
+        $('#qrKartuBtn', el).classList.toggle('d-none', !metodeBoleh(r.metode, 'KARTU'));
         iv = r.interval; nextAt = Date.now() + r.sisa;
         later(tick, r.sisa + 300);
       } catch (e) {
@@ -1531,6 +1567,7 @@ VIEWS.qrDisplay = {
     bindActs(el, {
       back: () => navigate('absensiGuru'),
       detail: () => navigate('detailSesi', { id: p.id }),
+      kartu: () => navigate('scanKartu', { id: p.id }),
       fs: () => { const c = $('#qrCard', el); (c.requestFullscreen || c.webkitRequestFullscreen || function () { toast('Layar penuh tidak didukung', 'warning'); }).call(c); },
       close: async () => {
         if (!await confirmDlg('Tutup sesi ini? Siswa yang belum absen otomatis <b>Alpha</b>.', 'Tutup Sesi', 'danger')) return;
@@ -1553,7 +1590,8 @@ VIEWS.detailSesi = {
       d.siswa.forEach(x => { c[x.status] = (c[x.status] || 0) + 1; });
       el.innerHTML = pageHead('Daftar Hadir: ' + d.sesi.kelas + ' · ' + d.sesi.mapel, fmtDT(d.sesi.tanggal, false) + ' · ' + d.sesi.jam_mulai + '–' + d.sesi.jam_selesai + ' · ' + d.sesi.guru,
         '<button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>' +
-        (d.sesi.status === 'AKTIF' && d.sesi.metode !== 'FACE' ? '<button class="btn btn-primary btn-sm" data-act="qr"><i class="bi bi-qr-code"></i> QR</button>' : '') +
+        (d.sesi.status === 'AKTIF' && metodeBoleh(d.sesi.metode, 'QR') ? '<button class="btn btn-primary btn-sm" data-act="qr"><i class="bi bi-qr-code"></i> QR</button>' : '') +
+        (d.sesi.status === 'AKTIF' && metodeBoleh(d.sesi.metode, 'KARTU') ? '<button class="btn btn-success btn-sm" data-act="kartu"><i class="bi bi-upc-scan"></i> Scan Kartu</button>' : '') +
         '<button class="btn btn-outline-secondary btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button>' +
         '<button class="btn btn-outline-success btn-sm" data-act="csv"><i class="bi bi-filetype-csv"></i> CSV</button>') +
         '<div class="row g-2 mb-3">' + Object.keys(c).map(k => '<div class="col-4 col-md-2"><div class="card"><div class="card-body py-2 text-center"><div class="small text-muted">' + k +
@@ -1572,6 +1610,7 @@ VIEWS.detailSesi = {
       qr: () => navigate('qrDisplay', { id: p.id }),
       reload: load,
       bio: uid => showBiodata(uid),
+      kartu: () => navigate('scanKartu', { id: p.id }),
       csv: () => downloadCsv('Absensi_' + d.sesi.kelas + '_' + d.sesi.tanggal, ['No', 'NIS', 'Nama', 'Status', 'Waktu', 'Metode', 'Keterangan'],
         d.siswa.map((x, i) => [i + 1, x.username, x.nama, x.status, x.waktu, x.metode, x.keterangan])),
       set: uid => {
@@ -1598,7 +1637,7 @@ VIEWS.kiosk = {
     if (!p.id) {
       el.innerHTML = pageHead('Mode Kiosk Wajah', 'Satu perangkat (laptop/tablet) di depan kelas untuk memindai wajah siswa bergantian') + spinner();
       Face.preload();
-      const list = (await api('listSesi', { aktif: true }, { silent: true })).filter(r => r.metode !== 'QR' && r.status === 'AKTIF');
+      const list = (await api('listSesi', { aktif: true }, { silent: true })).filter(r => metodeBoleh(r.metode, 'FACE') && r.status === 'AKTIF');
       el.innerHTML = pageHead('Mode Kiosk Wajah', 'Pilih sesi absensi aktif (metode Wajah atau QR+Wajah)', '<button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>') +
         '<div class="card"><div class="card-body">' + tableHtml([
           { h: 'Kelas / Mapel', f: r => '<b>' + esc(r.kelas) + '</b> · ' + esc(r.mapel) },
@@ -1661,8 +1700,9 @@ VIEWS.absenSiswa = {
         '<div class="card mb-2"><div class="card-body d-flex align-items-center gap-3"><div class="stat-icon bg-primary-subtle text-primary"><i class="bi bi-book"></i></div>' +
         '<div class="flex-grow-1"><div class="fw-bold">' + esc(x.mapel) + '</div><div class="small text-muted">' + esc(x.guru) + ' · ' + esc(x.jam_mulai + '–' + x.jam_selesai) + '</div></div>' +
         (x.sudah ? badge(x.status) + '<div class="small text-muted ms-1">' + esc(x.waktu.substring(11, 16)) + '</div>' :
-          (x.metode !== 'QR' ? '<button class="btn btn-outline-primary btn-sm" data-act="face" data-id="' + x.id + '"><i class="bi bi-person-bounding-box"></i> Wajah</button>' : '') +
-          (x.metode !== 'FACE' ? '<button class="btn btn-primary btn-sm" data-act="scan"><i class="bi bi-qr-code-scan"></i> QR</button>' : '')) +
+          (metodeBoleh(x.metode, 'FACE') ? '<button class="btn btn-outline-primary btn-sm" data-act="face" data-id="' + x.id + '"><i class="bi bi-person-bounding-box"></i> Wajah</button>' : '') +
+          (metodeBoleh(x.metode, 'QR') ? '<button class="btn btn-primary btn-sm" data-act="scan"><i class="bi bi-qr-code-scan"></i> QR</button>' : '') +
+          (x.metode === 'KARTU' ? '<span class="small text-muted">Tunjukkan kartu ke guru</span>' : '')) +
         '</div></div>').join('') : emptyState('Belum ada sesi absensi yang dibuka guru untuk kelasmu saat ini.', 'calendar-check');
     }
     bindActs(el, { reload: load, scan: () => navigate('scanQr'), face: id => navigate('absenWajah', { sesi_id: id }) });
@@ -1780,6 +1820,163 @@ VIEWS.wajah = {
           Face.stop();
           $('#rArea', el).innerHTML = resultCard(false, 'Registrasi Gagal', [esc(e.message)], '<button class="btn btn-primary" data-act="again"><i class="bi bi-arrow-repeat"></i> Ulangi</button>');
         }
+      }
+    });
+  }
+};
+</script>
+
+<script>
+/* =============================================================
+ * ViewsKartu.html — Kartu QR siswa (ukuran ID card) & Mode Scan Kartu
+ * ============================================================= */
+
+const METODE_LABEL = {
+  QR: 'QR (HP siswa)', FACE: 'Wajah', KEDUANYA: 'QR atau Wajah',
+  KARTU: 'Kartu QR', QR_KARTU: 'QR HP atau Kartu', SEMUA: 'QR, Wajah, atau Kartu'
+};
+const METODE_OPSI = [['QR_KARTU', 'QR dari HP atau Kartu QR (disarankan)'], ['QR', 'QR dinamis dari HP saja'], ['KARTU', 'Kartu QR saja (dipindai guru)'],
+  ['FACE', 'Wajah (face recognition)'], ['KEDUANYA', 'QR dari HP atau Wajah'], ['SEMUA', 'Semua: QR HP, Wajah, atau Kartu']];
+function metodeBoleh(m, jenis) {
+  return { QR: ['QR', 'KEDUANYA', 'QR_KARTU', 'SEMUA'], FACE: ['FACE', 'KEDUANYA', 'SEMUA'], KARTU: ['KARTU', 'QR_KARTU', 'SEMUA'] }[jenis].indexOf(m) >= 0;
+}
+
+/* ---------------- CETAK KARTU (85,6 × 54 mm, 10 per A4) ---------------- */
+function cetakKartu(data) {
+  if (!data.kartu.length) return toast('Tidak ada siswa untuk dicetak', 'warning');
+  let area = $('#printArea');
+  if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+  area.innerHTML = '<div class="kartu-sheet">' + data.kartu.map((c, i) =>
+    '<div class="kartu">' +
+    '<div class="k-head"><i class="bi bi-mortarboard-fill"></i><div class="k-head-t"><div class="k-sek">' + esc(data.sekolah || '') + '</div><div class="k-jud">KARTU ABSENSI SISWA</div></div></div>' +
+    '<div class="k-body"><div class="k-info"><div class="k-nama">' + esc(c.nama) + '</div>' +
+    '<table><tr><td>NISN</td><td>: ' + esc(c.nisn) + '</td></tr><tr><td>Kelas</td><td>: ' + esc(c.kelas) + '</td></tr>' +
+    (c.jk ? '<tr><td>L/P</td><td>: ' + esc(c.jk) + '</td></tr>' : '') + '</table></div>' +
+    '<div class="k-qr" id="kqr' + i + '"></div></div>' +
+    '<div class="k-foot">Pindai di depan guru · TA ' + esc(data.tahun_ajaran || '') + (c.versi > 1 ? ' · cetakan ke-' + c.versi : '') + '</div>' +
+    '</div>').join('') + '</div>';
+  data.kartu.forEach((c, i) => new QRCode(document.getElementById('kqr' + i), { text: c.qr, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.M }));
+  document.body.classList.add('cetak-kartu');
+  const selesai = () => { document.body.classList.remove('cetak-kartu'); window.removeEventListener('afterprint', selesai); };
+  window.addEventListener('afterprint', selesai);
+  toast('Menyiapkan ' + data.kartu.length + ' kartu… Pilih kertas A4, skala 100%, lalu "Simpan sebagai PDF" atau cetak.', 'info');
+  setTimeout(() => { window.print(); setTimeout(selesai, 1500); }, 600);
+}
+
+/** Dialog cetak kartu per kelas (admin & guru) */
+async function cetakKartuDlg(kelasAwal) {
+  await getMaster();
+  formModal({
+    title: 'Cetak Kartu QR Siswa',
+    intro: '<p class="small text-muted">Ukuran ID card (8,5 × 5,4 cm), 10 kartu per lembar A4. Gunting mengikuti garis putus-putus, lalu laminating atau masukkan ke ID card holder. ' +
+      'QR berisi kode acak (bukan NISN), dan kartu hanya bisa dipindai oleh akun guru/admin.</p>',
+    values: { kelas_id: kelasAwal || '' },
+    fields: [{ name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), required: true }],
+    submitText: 'Cetak',
+    onSubmit: async f => { const d = await api('kartuSiswa', { kelas_id: f.kelas_id }); later(() => cetakKartu(d), 400); }
+  });
+}
+
+/** Dialog kartu satu siswa: cetak, atau (admin) ganti kartu yang hilang */
+function kartuSiswaDlg(u) {
+  const el = modal({
+    title: 'Kartu QR: ' + u.nama,
+    body: '<p class="mb-2">Pilih tindakan untuk kartu <b>' + esc(u.nama) + '</b> (' + esc(u.username) + '):</p>' +
+      '<ul class="small text-muted mb-0"><li><b>Cetak</b>: mencetak kartu yang berlaku sekarang.</li>' +
+      '<li><b>Kartu hilang/dipinjamkan</b>: membuat kode baru. Kartu lama langsung tidak berlaku.</li></ul>',
+    footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button>' +
+      (S.user.role === 'admin' ? '<button class="btn btn-outline-danger" id="kGanti"><i class="bi bi-arrow-repeat"></i> Kartu hilang → buat baru</button>' : '') +
+      '<button class="btn btn-primary" id="kCetak"><i class="bi bi-printer"></i> Cetak</button>'
+  });
+  $('#kCetak', el).onclick = async () => { const d = await api('kartuSiswa', { user_ids: [u.id] }); closeModal(); later(() => cetakKartu(d), 400); };
+  const g = $('#kGanti', el);
+  if (g) g.onclick = async () => {
+    const d = await api('gantiKartu', { user_id: u.id });
+    toast('Kartu baru dibuat. Kartu lama tidak berlaku lagi.', 'success');
+    closeModal(); later(() => cetakKartu(d), 400);
+  };
+}
+
+/* ---------------- BUNYI ---------------- */
+let _audio = null;
+function bip(ok) {
+  try {
+    _audio = _audio || new (window.AudioContext || window.webkitAudioContext)();
+    const tones = ok ? [[1046, 0, 0.12]] : [[330, 0, 0.15], [262, 0.18, 0.2]];
+    tones.forEach(t => {
+      const o = _audio.createOscillator(), g = _audio.createGain();
+      o.frequency.value = t[0]; o.type = 'sine'; g.gain.value = 0.15;
+      o.connect(g); g.connect(_audio.destination);
+      o.start(_audio.currentTime + t[1]); o.stop(_audio.currentTime + t[1] + t[2]);
+    });
+  } catch (e) { }
+  try { if (navigator.vibrate) navigator.vibrate(ok ? 60 : [80, 60, 80]); } catch (e) { }
+}
+
+/* ---------------- MODE SCAN KARTU ---------------- */
+VIEWS.scanKartu = {
+  title: 'Scan Kartu',
+  render: async function (el, p) {
+    el.innerHTML = spinner();
+    const d = await api('detailSesi', { id: p.id }, { silent: true });
+    let hadir = d.siswa.filter(x => ['Hadir', 'Terlambat', 'Izin', 'Sakit'].indexOf(x.status) >= 0).length, total = d.siswa.length;
+    el.innerHTML = '<div class="d-flex flex-wrap justify-content-between gap-2 mb-3 no-print"><button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>' +
+      '<div class="d-flex gap-2"><button class="btn btn-outline-primary btn-sm" data-act="cam"><i class="bi bi-camera"></i> <span id="skCamLbl">Pakai kamera</span></button>' +
+      '<button class="btn btn-outline-secondary btn-sm" data-act="detail"><i class="bi bi-list-check"></i> Daftar hadir</button></div></div>' +
+      '<div class="text-center mb-3"><h4 class="fw-bold mb-0">Scan Kartu: ' + esc(d.sesi.kelas + ' · ' + d.sesi.mapel) + '</h4>' +
+      '<div class="text-muted small">Siswa maju satu per satu dan menunjukkan kartunya · ' + esc(d.sesi.jam_mulai + '–' + d.sesi.jam_selesai) + '</div>' +
+      '<div class="display-6 fw-bold mt-2"><span id="skHadir">' + hadir + '</span><span class="text-muted fs-4"> / ' + total + ' tercatat</span></div></div>' +
+      '<div class="row justify-content-center g-3"><div class="col-lg-6">' +
+      '<div id="skFlash" class="card mb-3"><div class="card-body text-center py-4 text-muted"><i class="bi bi-upc-scan fs-1 d-block mb-2"></i>Menunggu kartu…</div></div>' +
+      '<div id="skReader" class="mb-3" style="max-width:420px;margin:auto"></div>' +
+      '<div class="input-group input-group-lg mb-1"><span class="input-group-text"><i class="bi bi-upc"></i></span>' +
+      '<input id="skInput" class="form-control" placeholder="Scanner USB / ketik kode kartu lalu Enter" autocomplete="off" autocapitalize="characters" spellcheck="false"></div>' +
+      '<div class="form-text mb-3">Scanner barcode USB bekerja seperti keyboard: cukup arahkan ke QR kartu saat kotak ini aktif.</div>' +
+      '<div class="card"><div class="card-header small">Baru dipindai</div><div class="card-body p-2" id="skLog"><div class="small text-muted p-2">Belum ada</div></div></div>' +
+      '</div></div>';
+    const input = $('#skInput', el);
+    let lastCode = '', lastAt = 0, busy = false, camOn = false;
+    const presisi = window.matchMedia && matchMedia('(pointer:fine)').matches; // laptop/PC: kotak input selalu fokus untuk scanner USB
+    if (presisi) input.focus();
+    const flash = (jenis, judul, sub) => {
+      const warna = { ok: 'success', sudah: 'primary', err: 'danger' }[jenis];
+      const ikon = { ok: 'check-circle-fill', sudah: 'info-circle-fill', err: 'x-circle-fill' }[jenis];
+      $('#skFlash', el).outerHTML = '<div id="skFlash" class="card mb-3 border-0 text-bg-' + warna + '"><div class="card-body text-center py-4">' +
+        '<i class="bi bi-' + ikon + '" style="font-size:3rem"></i><div class="fs-3 fw-bold mt-1">' + esc(judul) + '</div><div class="fs-6">' + esc(sub || '') + '</div></div></div>';
+    };
+    const log = html => {
+      const l = $('#skLog', el); if (l.querySelector('.text-muted.p-2')) l.innerHTML = '';
+      l.insertAdjacentHTML('afterbegin', '<div class="small border-bottom py-1 px-2">' + html + ' <span class="text-muted float-end">' + new Date().toLocaleTimeString('id-ID') + '</span></div>');
+    };
+    async function proses(kode) {
+      kode = String(kode || '').trim();
+      if (!kode || busy) return;
+      if (kode === lastCode && Date.now() - lastAt < 4000) return; // kartu yang sama tertahan di depan kamera
+      lastCode = kode; lastAt = Date.now(); busy = true;
+      try {
+        const r = await api('scanKartu', { sesi_id: p.id, kode: kode }, { silent: true, quiet: true });
+        if (r.sudah) { flash('sudah', r.nama, 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
+        else {
+          flash('ok', r.nama, r.status + ' · ' + r.waktu.substring(11, 16)); bip(true);
+          hadir = r.hadir; $('#skHadir', el).textContent = hadir;
+          log('<i class="bi bi-check-circle text-success"></i> <b>' + esc(r.nama) + '</b> — ' + esc(r.status));
+        }
+      } catch (e) {
+        flash('err', 'Ditolak', e.message); bip(false);
+        log('<i class="bi bi-x-circle text-danger"></i> ' + esc(e.message));
+      } finally { busy = false; QRS.busy = false; }
+    }
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const v = input.value; input.value = ''; proses(v); } });
+    if (presisi) input.addEventListener('blur', () => later(() => { if (el.isConnected && !$('.modal.show') && !camOn) input.focus(); }, 300));
+    bindActs(el, {
+      back: () => navigate('absensiGuru'),
+      detail: () => navigate('detailSesi', { id: p.id }),
+      cam: async () => {
+        if (camOn) { await QRS.stop(); camOn = false; $('#skCamLbl', el).textContent = 'Pakai kamera'; $('#skReader', el).innerHTML = ''; return; }
+        try {
+          $('#skCamLbl', el).textContent = 'Matikan kamera'; camOn = true;
+          await QRS.start('skReader', kode => { setTimeout(() => { QRS.busy = false; }, 1200); proses(kode); });
+        } catch (e) { camOn = false; $('#skCamLbl', el).textContent = 'Pakai kamera'; toast(e.message, 'danger'); }
       }
     });
   }
