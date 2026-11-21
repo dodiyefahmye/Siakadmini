@@ -209,9 +209,9 @@ const ROLE_LABEL = { admin: 'Administrator', guru: 'Guru', siswa: 'Siswa' };
 const JENIS_LABEL = { KUIS_BULANAN: 'Kuis Bulanan', UTS: 'UTS', UAS: 'UAS' };
 const MENUS = {
   admin: [['dashAdmin', 'speedometer2', 'Dashboard'], ['users', 'people', 'Pengguna'], ['master', 'diagram-3', 'Kelas & Mapel'],
-    ['absensiGuru', 'qr-code', 'Absensi'], ['bankSoal', 'journal-text', 'Bank Soal'], ['ujianGuru', 'pencil-square', 'Ujian / CBT'],
+    ['absenHarian', 'calendar-day', 'Absen Harian'], ['absensiGuru', 'qr-code', 'Absen Mapel'], ['bankSoal', 'journal-text', 'Bank Soal'], ['ujianGuru', 'pencil-square', 'Ujian / CBT'],
     ['laporan', 'bar-chart-line', 'Laporan'], ['auditLog', 'clock-history', 'Log Aktivitas'], ['pengaturan', 'gear', 'Pengaturan']],
-  guru: [['dashGuru', 'speedometer2', 'Dashboard'], ['absensiGuru', 'qr-code', 'Absensi'], ['bankSoal', 'journal-text', 'Bank Soal'],
+  guru: [['dashGuru', 'speedometer2', 'Dashboard'], ['absenHarian', 'calendar-day', 'Absen Harian'], ['absensiGuru', 'qr-code', 'Absen Mapel'], ['bankSoal', 'journal-text', 'Bank Soal'],
     ['ujianGuru', 'pencil-square', 'Ujian / CBT'], ['laporan', 'bar-chart-line', 'Laporan']],
   siswa: [['dashSiswa', 'house', 'Beranda'], ['absenSiswa', 'qr-code-scan', 'Absen'], ['ujianSiswa', 'pencil-square', 'Ujian'],
     ['laporanSiswa', 'bar-chart-line', 'Nilai'], ['wajah', 'person-bounding-box', 'Wajah']]
@@ -556,7 +556,8 @@ function parseTSV(text) {
 /* ---------------- layout & router ---------------- */
 function renderShell() {
   const u = S.user;
-  const menu = MENUS[u.role];
+  // menu Absen Harian untuk guru hanya bila ia wali kelas atau petugas piket
+  const menu = MENUS[u.role].filter(m => m[0] !== 'absenHarian' || u.role === 'admin' || u.piket || (u.wali_kelas || []).length);
   const isSiswa = u.role === 'siswa';
   document.body.classList.toggle('has-bottom-nav', isSiswa);
   const items = menu.map(m => '<a href="#" class="nav-link" data-nav="' + m[0] + '"><i class="bi bi-' + m[1] + '"></i> ' + esc(m[2]) + '</a>').join('');
@@ -830,7 +831,7 @@ VIEWS.users = {
       $('#ucount', el).textContent = list.length + ' pengguna';
       const cols = [
         { h: 'Username', f: u => '<code>' + esc(u.username) + '</code>' },
-        { h: 'Nama', f: u => esc(u.nama) },
+        { h: 'Nama', f: u => esc(u.nama) + (u.piket ? ' <span class="badge text-bg-warning" title="Petugas piket absen harian">Piket</span>' : '') },
         { h: 'L/P', cls: 'text-center', f: u => jkBadge(u.jk) },
       ];
       if (role === 'siswa') {
@@ -869,10 +870,11 @@ VIEWS.users = {
           { name: 'role', label: 'Role', type: 'select', options: [['siswa', 'Siswa'], ['guru', 'Guru'], ['admin', 'Admin']], placeholder: false, col: 'col-md-6' },
           { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), col: 'col-md-6' },
           { name: 'password', label: 'Password', type: 'password', help: u.id ? 'Kosongkan jika tidak diubah' : 'Kosongkan = sama dengan username', col: 'col-md-6', autocomplete: 'new-password' },
-          { name: 'status', label: 'Status', type: 'select', options: [['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif']], placeholder: false, col: 'col-md-6' }
+          { name: 'status', label: 'Status', type: 'select', options: [['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif']], placeholder: false, col: 'col-md-6' },
+          { name: 'piket', label: 'Petugas piket — boleh membuka & memindai absen harian semua kelas', type: 'checkbox' }
         ].concat(biodataFields()),
         onRender: form => {
-          const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); toggleBiodata(form, form.role.value); };
+          const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); showField(form, 'piket', form.role.value === 'guru'); toggleBiodata(form, form.role.value); };
           form.role.onchange = t; t();
           const fi = $('#ufFotoFile');
           if (fi) {
@@ -966,6 +968,7 @@ VIEWS.master = {
       $('#tKelas', el).innerHTML = tableHtml([
         { h: 'Kelas', f: k => '<b>' + esc(k.nama_kelas) + '</b>' }, { h: 'Wali kelas', f: k => esc(k.wali_kelas || '-') },
         { h: 'Siswa', f: k => '<b>' + k.jumlah_siswa + '</b>' + (k.jumlah_l || k.jumlah_p ? ' <span class="small text-muted">(L ' + k.jumlah_l + ' · P ' + k.jumlah_p + ')</span>' : '') },
+        { h: 'Mode absen', f: k => badge(MODE_LABEL[k.mode_absensi] || k.mode_absensi, 'light') },
         { h: 'TA', f: k => esc(k.tahun_ajaran) },
         { h: '', cls: 'text-end text-nowrap', f: k => actBtn('editKelas', k.id, 'pencil', 'Ubah') + ' ' + actBtn('delKelas', k.id, 'trash', 'Hapus', 'outline-danger') }
       ], M.kelas, { empty: 'Belum ada kelas' });
@@ -975,9 +978,10 @@ VIEWS.master = {
       ], M.mapel, { empty: 'Belum ada mapel' });
     }
     const kelasForm = k => formModal({
-      title: k ? 'Ubah Kelas' : 'Tambah Kelas', values: k || { tahun_ajaran: S.settings.tahun_ajaran },
+      title: k ? 'Ubah Kelas' : 'Tambah Kelas', values: k || { tahun_ajaran: S.settings.tahun_ajaran, mode_absensi: 'MAPEL' },
       fields: [{ name: 'id', type: 'hidden' }, { name: 'nama_kelas', label: 'Nama kelas', required: true, placeholder: 'mis. X-IPA-1' },
-        { name: 'wali_kelas_id', label: 'Wali kelas', type: 'select', options: guruOpts() }, { name: 'tahun_ajaran', label: 'Tahun ajaran' }],
+        { name: 'wali_kelas_id', label: 'Wali kelas', type: 'select', options: guruOpts() }, { name: 'tahun_ajaran', label: 'Tahun ajaran' },
+        { name: 'mode_absensi', label: 'Mode absensi', type: 'select', placeholder: false, options: MODE_OPSI, help: 'Wali kelas juga dapat mengubahnya dari menu Absen Harian' }],
       onSubmit: async d => { await api('saveKelas', d); toast('Kelas disimpan', 'success'); load(); }
     });
     const mapelForm = m => formModal({
@@ -1022,6 +1026,14 @@ VIEWS.pengaturan = {
         { name: 'geo_lat', label: 'Latitude sekolah', col: 'col-md-4' }, { name: 'geo_lng', label: 'Longitude sekolah', col: 'col-md-4' },
         { name: 'geo_radius', label: 'Radius (meter)', type: 'number', min: 20, col: 'col-md-4' },
         { type: 'html', name: 'x', html: '<button type="button" class="btn btn-sm btn-outline-primary" id="btnLoc"><i class="bi bi-geo-alt"></i> Gunakan lokasi saya saat ini</button>' }]) +
+      sec('Absen Harian', 'calendar-day', [
+        { name: 'jam_masuk', label: 'Jam masuk sekolah', type: 'time', col: 'col-6 col-md-3', help: 'Lewat jam ini + toleransi = Terlambat' },
+        { name: 'jam_tutup_harian', label: 'Absen harian ditutup', type: 'time', col: 'col-6 col-md-3', help: 'Yang belum absen tercatat Alpha' },
+        { name: 'metode_harian', label: 'Metode bawaan', type: 'select', placeholder: false, options: METODE_OPSI, col: 'col-md-6' },
+        { type: 'html', name: 'x', col: 'col-12', html: '<label class="form-label small fw-semibold mb-1">Hari sekolah</label><div class="d-flex flex-wrap gap-3">' +
+          ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map((h, i) => '<div class="form-check"><input class="form-check-input hs-cb" type="checkbox" id="hs' + (i + 1) + '" value="' + (i + 1) + '"' +
+            ((st.hari_sekolah || '1,2,3,4,5,6').split(',').indexOf(String(i + 1)) >= 0 ? ' checked' : '') + '><label class="form-check-label" for="hs' + (i + 1) + '">' + h + '</label></div>').join('') +
+          '</div><div class="form-text">Tanggal merah & libur semester diatur di menu Absen Harian → Hari Libur.</div>' }]) +
       sec('Ujian & Penilaian', 'pencil-square', [
         { name: 'maks_pelanggaran_default', label: 'Batas pelanggaran default (0 = tanpa kunci)', type: 'number', min: 0, col: 'col-md-4' },
         { name: 'bobot_hadir', label: 'Bobot kehadiran (%)', type: 'number', min: 0, col: 'col-6 col-md-2' },
@@ -1063,6 +1075,7 @@ VIEWS.pengaturan = {
       e.preventDefault();
       const d = readForm(form);
       delete d.x;
+      d.hari_sekolah = $$('.hs-cb', form).filter(c => c.checked).map(c => c.value).join(',');
       S.settings.zona_waktu = d.zona_waktu;
       await api('saveSettings', d);
       S.settings.nama_sekolah = d.nama_sekolah; S.settings.tahun_ajaran = d.tahun_ajaran; S.settings.semester = d.semester;
@@ -1710,7 +1723,7 @@ VIEWS.absensiGuru = {
   render: async function (el) {
     await getMaster();
     let tgl = todayISO();
-    el.innerHTML = pageHead('Sesi Absensi', 'Buka sesi, tampilkan QR di layar/proyektor, atau gunakan mode kiosk wajah',
+    el.innerHTML = pageHead('Absen per Mata Pelajaran', 'Buka sesi tiap jam pelajaran, tampilkan QR di layar/proyektor, scan kartu, atau mode kiosk wajah',
       '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu QR</button>' +
       '<button class="btn btn-outline-primary btn-sm" data-act="kiosk"><i class="bi bi-person-bounding-box"></i> Mode Kiosk</button>' +
       '<button class="btn btn-primary btn-sm" data-act="open"><i class="bi bi-plus-lg"></i> Buka Sesi</button>') +
@@ -1741,7 +1754,8 @@ VIEWS.absensiGuru = {
         title: 'Buka Sesi Absensi',
         values: { durasi_menit: 60, metode: 'QR_KARTU' },
         fields: [
-          { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), required: true, col: 'col-md-6' },
+          { name: 'kelas_id', label: 'Kelas', type: 'select', options: (S.master ? S.master.kelas : []).filter(k => k.mode_absensi !== 'HARIAN').map(k => [k.id, k.nama_kelas]), required: true, col: 'col-md-6',
+            help: 'Kelas dengan mode "Absen harian" tidak tampil di sini' },
           { name: 'mapel_id', label: 'Mata pelajaran', type: 'select', options: mapelOpts(), required: true, col: 'col-md-6' },
           { name: 'durasi_menit', label: 'Lama sesi dibuka (menit)', type: 'number', min: 5, max: 600, required: true, col: 'col-md-6' },
           { name: 'metode', label: 'Metode absensi', type: 'select', placeholder: false, col: 'col-md-6', options: METODE_OPSI,
@@ -1819,9 +1833,9 @@ VIEWS.qrDisplay = {
       $('#qrBar', el).style.width = (s / iv * 100) + '%';
     }, 250);
     bindActs(el, {
-      back: () => navigate('absensiGuru'),
-      detail: () => navigate('detailSesi', { id: p.id }),
-      kartu: () => navigate('scanKartu', { id: p.id }),
+      back: () => navigate(p.dari || 'absensiGuru'),
+      detail: () => navigate('detailSesi', { id: p.id, dari: p.dari }),
+      kartu: () => navigate('scanKartu', { id: p.id, dari: p.dari }),
       fs: () => { const c = $('#qrCard', el); (c.requestFullscreen || c.webkitRequestFullscreen || function () { toast('Layar penuh tidak didukung', 'warning'); }).call(c); },
       close: async () => {
         if (!await confirmDlg('Tutup sesi ini? Siswa yang belum absen otomatis <b>Alpha</b>.', 'Tutup Sesi', 'danger')) return;
@@ -1860,11 +1874,11 @@ VIEWS.detailSesi = {
         ], d.siswa, { empty: 'Belum ada siswa di kelas ini' }) + '</div></div>';
     }
     bindActs(el, {
-      back: () => navigate('absensiGuru'),
-      qr: () => navigate('qrDisplay', { id: p.id }),
+      back: () => navigate(p.dari || 'absensiGuru'),
+      qr: () => navigate('qrDisplay', { id: p.id, dari: p.dari }),
       reload: load,
       bio: uid => showBiodata(uid),
-      kartu: () => navigate('scanKartu', { id: p.id }),
+      kartu: () => navigate('scanKartu', { id: p.id, dari: p.dari }),
       csv: () => downloadCsv('Absensi_' + d.sesi.kelas + '_' + d.sesi.tanggal, ['No', 'NIS', 'Nama', 'Status', 'Waktu', 'Metode', 'Keterangan'],
         d.siswa.map((x, i) => [i + 1, x.username, x.nama, x.status, x.waktu, x.metode, x.keterangan])),
       set: uid => {
@@ -1906,7 +1920,7 @@ VIEWS.kiosk = {
       '<div class="text-center mb-3"><h4 class="fw-bold mb-0">Absensi Wajah</h4><div class="text-muted">Satu per satu: hadapkan wajah ke kamera lalu berkedip</div></div>' +
       '<div class="position-relative" style="max-width:420px;margin:auto">' + camBox('kv') + '<div id="kFlash"></div></div>' +
       '<div class="text-center mt-3"><span class="badge text-bg-success fs-6" id="kCount">0 tercatat</span></div><div id="kLog" class="mt-3 mx-auto" style="max-width:420px"></div>';
-    bindActs(el, { back: () => navigate('absensiGuru'), detail: () => navigate('detailSesi', { id: p.id }) });
+    bindActs(el, { back: () => navigate(p.dari || 'absensiGuru'), detail: () => navigate('detailSesi', { id: p.id, dari: p.dari }) });
     let active = true, n = 0;
     onLeave(() => { active = false; });
     const video = $('#kv', el), msg = $('#kvMsg', el);
@@ -2174,14 +2188,18 @@ VIEWS.scanKartu = {
   title: 'Scan Kartu',
   render: async function (el, p) {
     el.innerHTML = spinner();
-    const d = await api('detailSesi', { id: p.id }, { silent: true });
+    const gerbang = !!p.gerbang; // scan gerbang: kartu menentukan kelas → dicatat ke absen harian kelasnya
+    const d = gerbang ? { sesi: { kelas: 'Semua kelas', mapel: 'Absen Harian', jam_mulai: '', jam_selesai: '' }, siswa: [] } : await api('detailSesi', { id: p.id }, { silent: true });
     let hadir = d.siswa.filter(x => ['Hadir', 'Terlambat', 'Izin', 'Sakit'].indexOf(x.status) >= 0).length, total = d.siswa.length;
     el.innerHTML = '<div class="d-flex flex-wrap justify-content-between gap-2 mb-3 no-print"><button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Kembali</button>' +
       '<div class="d-flex gap-2"><button class="btn btn-outline-primary btn-sm" data-act="cam"><i class="bi bi-camera"></i> <span id="skCamLbl">Pakai kamera</span></button>' +
       '<button class="btn btn-outline-secondary btn-sm" data-act="detail"><i class="bi bi-list-check"></i> Daftar hadir</button></div></div>' +
-      '<div class="text-center mb-3"><h4 class="fw-bold mb-0">Scan Kartu: ' + esc(d.sesi.kelas + ' · ' + d.sesi.mapel) + '</h4>' +
+      (gerbang ? '<div class="text-center mb-3"><h4 class="fw-bold mb-0"><i class="bi bi-door-open"></i> Scan Kartu Gerbang · Absen Harian</h4>' +
+        '<div class="text-muted small">Semua kelas: siswa otomatis tercatat di absen harian kelasnya masing-masing</div>' +
+        '<div class="display-6 fw-bold mt-2"><span id="skHadir">0</span><span class="text-muted fs-4"> tercatat di layar ini</span></div></div>'
+      : '<div class="text-center mb-3"><h4 class="fw-bold mb-0">Scan Kartu: ' + esc(d.sesi.kelas + ' · ' + d.sesi.mapel) + '</h4>' +
       '<div class="text-muted small">Siswa maju satu per satu dan menunjukkan kartunya · ' + esc(d.sesi.jam_mulai + '–' + d.sesi.jam_selesai) + '</div>' +
-      '<div class="display-6 fw-bold mt-2"><span id="skHadir">' + hadir + '</span><span class="text-muted fs-4"> / ' + total + ' tercatat</span></div></div>' +
+      '<div class="display-6 fw-bold mt-2"><span id="skHadir">' + hadir + '</span><span class="text-muted fs-4"> / ' + total + ' tercatat</span></div></div>') +
       '<div class="row justify-content-center g-3"><div class="col-lg-6">' +
       '<div id="skFlash" class="card mb-3"><div class="card-body text-center py-4 text-muted"><i class="bi bi-upc-scan fs-1 d-block mb-2"></i>Menunggu kartu…</div></div>' +
       '<div id="skReader" class="mb-3" style="max-width:420px;margin:auto"></div>' +
@@ -2214,12 +2232,14 @@ VIEWS.scanKartu = {
       if (busy) { if (antre.indexOf(kode) < 0) antre.push(kode); return; } // dipindai beruntun: proses bergiliran
       busy = true;
       try {
-        const r = await api('scanKartu', { sesi_id: p.id, kode: kode }, { silent: true, quiet: true });
-        if (r.sudah) { flash('sudah', r.nama, 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
+        const r = gerbang ? await api('scanKartuHarian', { kode: kode }, { silent: true, quiet: true })
+                          : await api('scanKartu', { sesi_id: p.id, kode: kode }, { silent: true, quiet: true });
+        const kls = gerbang && r.kelas ? r.kelas + ' · ' : '';
+        if (r.sudah) { flash('sudah', r.nama, kls + 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
         else {
-          flash('ok', r.nama, r.status + ' · ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true);
-          hadir = r.hadir; $('#skHadir', el).textContent = hadir;
-          log('<i class="bi bi-check-circle text-success"></i> <b>' + esc(r.nama) + '</b> — ' + esc(r.status));
+          flash('ok', r.nama, kls + r.status + ' · ' + r.waktu.substring(11, 16), fotoSrc(r.foto)); bip(true);
+          hadir = gerbang ? hadir + 1 : r.hadir; $('#skHadir', el).textContent = hadir;
+          log('<i class="bi bi-check-circle text-success"></i> <b>' + esc(r.nama) + '</b>' + (gerbang ? ' (' + esc(r.kelas) + ')' : '') + ' — ' + esc(r.status));
         }
       } catch (e) {
         flash('err', 'Ditolak', e.message); bip(false);
@@ -2232,8 +2252,8 @@ VIEWS.scanKartu = {
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const v = input.value; input.value = ''; proses(v); } });
     if (presisi) input.addEventListener('blur', () => later(() => { if (el.isConnected && !$('.modal.show') && !camOn) input.focus(); }, 300));
     bindActs(el, {
-      back: () => navigate('absensiGuru'),
-      detail: () => navigate('detailSesi', { id: p.id }),
+      back: () => navigate(gerbang ? 'absenHarian' : (p.dari || 'absensiGuru')),
+      detail: () => gerbang ? navigate('absenHarian') : navigate('detailSesi', { id: p.id, dari: p.dari }),
       cam: async () => {
         if (camOn) { await QRS.stop(); camOn = false; $('#skCamLbl', el).textContent = 'Pakai kamera'; $('#skReader', el).innerHTML = ''; return; }
         try {
@@ -2244,6 +2264,146 @@ VIEWS.scanKartu = {
     });
   }
 };
+</script>
+
+<script>
+/* =============================================================
+ * ViewsHarian.html — Absen Harian (sekali sehari per kelas)
+ *  - Admin & guru piket: semua kelas, "Buka semua", scan kartu gerbang, hari libur (admin)
+ *  - Wali kelas: kelas perwaliannya, termasuk mengatur mode absensi kelas
+ * ============================================================= */
+
+const MODE_LABEL = { HARIAN: 'Absen harian', MAPEL: 'Per mapel', KEDUANYA: 'Harian + per mapel' };
+const MODE_OPSI = [['MAPEL', 'Per mata pelajaran (tiap jam pelajaran)'], ['HARIAN', 'Absen harian (sekali sehari, saat masuk)'], ['KEDUANYA', 'Keduanya (harian + per mapel)']];
+const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+function tglPanjang(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return HARI[d.getDay()] + ', ' + fmtDT(iso, false);
+}
+
+VIEWS.absenHarian = {
+  title: 'Absen Harian',
+  render: async function (el) {
+    el.innerHTML = pageHead('Absen Harian', 'Memuat…') + spinner();
+    let d = null;
+    async function load(diam) {
+      d = await api('harianHariIni', {}, { silent: true, quiet: !!diam });
+      draw();
+    }
+    function aksi(k) {
+      const x = k.sesi;
+      if (k.mode === 'MAPEL') return '<span class="small text-muted">Memakai absen per mapel</span>';
+      if (!x) return d.libur ? '' : actBtn('buka', k.id, 'play-circle', 'Buka absen harian', 'primary');
+      let h = '';
+      if (x.status === 'AKTIF') {
+        if (metodeBoleh(x.metode, 'QR')) h += actBtn('qr', x.id, 'qr-code', 'Tampilkan QR', 'outline-primary') + ' ';
+        if (metodeBoleh(x.metode, 'KARTU')) h += actBtn('kartu', x.id, 'upc-scan', 'Scan kartu', 'outline-success') + ' ';
+        if (metodeBoleh(x.metode, 'FACE')) h += actBtn('kiosk', x.id, 'person-bounding-box', 'Kiosk wajah', 'outline-primary') + ' ';
+      }
+      h += actBtn('detail', x.id, 'list-check', 'Daftar hadir') + ' ';
+      if (x.status === 'AKTIF' || x.status === 'BERAKHIR') h += actBtn('tutup', x.id, 'stop-circle', 'Tutup sekarang (yang belum absen = Alpha)', 'outline-danger');
+      return h;
+    }
+    function draw() {
+      if (!el.isConnected) return;
+      const harian = d.kelas.filter(k => k.mode !== 'MAPEL');
+      const dibuka = harian.filter(k => k.sesi).length;
+      const hadir = harian.reduce((a, k) => a + (k.sesi ? k.sesi.hadir : 0), 0);
+      const telat = harian.reduce((a, k) => a + (k.sesi ? k.sesi.terlambat : 0), 0);
+      const siswa = harian.reduce((a, k) => a + k.total, 0);
+      el.innerHTML = pageHead('Absen Harian', tglPanjang(d.tanggal) + ' · Jam masuk ' + d.jam_masuk + ' (toleransi ' + d.toleransi + ' menit) · ditutup otomatis ' + d.jam_tutup,
+        (d.boleh_semua && !d.libur ? '<button class="btn btn-primary btn-sm" data-act="semua"><i class="bi bi-play-circle"></i> Buka semua kelas</button>' +
+          '<button class="btn btn-success btn-sm" data-act="gerbang"><i class="bi bi-door-open"></i> Scan Kartu Gerbang</button>' : '') +
+        (S.user.role === 'admin' ? '<button class="btn btn-outline-secondary btn-sm" data-act="libur"><i class="bi bi-calendar-x"></i> Hari Libur</button>' : '') +
+        '<button class="btn btn-light btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button>') +
+        (d.libur ? '<div class="alert alert-warning"><i class="bi bi-calendar-x"></i> ' + esc(d.libur) + '. Absen harian tidak dibuka hari ini.</div>' : '') +
+        (!d.kelas.length ? '<div class="card"><div class="card-body">' + emptyState('Anda bukan wali kelas atau petugas piket. Hubungi admin bila perlu akses absen harian.', 'calendar-day') + '</div></div>' :
+        '<div class="row g-2 mb-3">' +
+        statCard('door-open', 'Kelas dibuka', dibuka + ' / ' + harian.length, 'primary', 'col-6 col-md-3') +
+        statCard('person-check', 'Siswa hadir', hadir + ' / ' + siswa, 'success', 'col-6 col-md-3') +
+        statCard('alarm', 'Terlambat', telat, 'warning', 'col-6 col-md-3') +
+        statCard('hourglass-split', 'Belum absen', harian.reduce((a, k) => a + (k.sesi ? Math.max(0, k.total - k.sesi.tercatat) : k.total), 0), 'secondary', 'col-6 col-md-3') + '</div>' +
+        '<div class="card"><div class="card-body">' + tableHtml([
+          { h: 'Kelas', f: k => '<b>' + esc(k.nama_kelas) + '</b><div class="small text-muted">Wali: ' + esc(k.wali || '-') + '</div>' },
+          { h: 'Mode', f: k => badge(MODE_LABEL[k.mode], k.mode === 'MAPEL' ? 'light' : 'info') + (k.boleh_mode ? ' <a href="#" class="small" data-act="mode" data-id="' + k.id + '">ubah</a>' : '') },
+          { h: 'Status', f: k => k.mode === 'MAPEL' ? '-' : !k.sesi ? badge('Belum dibuka', 'light') : badge(k.sesi.status, null, k.sesi.status === 'AKTIF' ? 'Dibuka' : k.sesi.status === 'SELESAI' ? 'Ditutup' : k.sesi.status) +
+            '<div class="small text-muted">' + esc(METODE_LABEL[k.sesi.metode] || k.sesi.metode) + '</div>' },
+          { h: 'Hadir', f: k => k.sesi ? '<b>' + k.sesi.hadir + '</b>/' + k.total + (k.sesi.terlambat ? ' <span class="small text-warning">(' + k.sesi.terlambat + ' terlambat)</span>' : '') : (k.mode === 'MAPEL' ? '-' : '0/' + k.total) },
+          { h: '', cls: 'text-end text-nowrap', f: aksi }
+        ], d.kelas) + '</div></div>' +
+        '<div class="small text-muted mt-2"><i class="bi bi-info-circle"></i> Terlambat dihitung dari jam masuk sekolah, bukan dari kapan absen dibuka. ' +
+        'Absen yang belum ditutup akan ditutup otomatis pukul ' + esc(d.jam_tutup) + ' dan siswa yang belum absen tercatat Alpha (bisa diubah manual di Daftar hadir untuk Izin/Sakit).</div>');
+    }
+    const bukaDlg = (judul, data) => formModal({
+      title: judul, values: { metode: d.metode_default },
+      intro: '<p class="small text-muted mb-2">Siswa dapat absen sampai pukul <b>' + esc(d.jam_tutup) + '</b>. Lewat pukul ' + esc(d.jam_masuk) + ' + ' + d.toleransi + ' menit tercatat Terlambat.</p>',
+      fields: [{ name: 'metode', label: 'Cara absen', type: 'select', placeholder: false, options: METODE_OPSI }],
+      submitText: 'Buka',
+      onSubmit: async f => {
+        const r = await api('bukaHarian', Object.assign({ metode: f.metode }, data));
+        toast(r.dibuka.length ? 'Absen harian dibuka: ' + r.dibuka.map(x => x.kelas).join(', ') : 'Tidak ada kelas baru yang dibuka', r.dibuka.length ? 'success' : 'warning');
+        if (r.dilewati.length) toast('Dilewati: ' + r.dilewati.map(x => x.kelas + ' (' + x.alasan + ')').join(', '), 'info');
+        load();
+      }
+    });
+    bindActs(el, {
+      reload: () => load(),
+      semua: () => bukaDlg('Buka Absen Harian Semua Kelas', { semua: true }),
+      buka: id => bukaDlg('Buka Absen Harian ' + d.kelas.find(k => k.id === id).nama_kelas, { kelas_id: id }),
+      gerbang: () => navigate('scanKartu', { gerbang: true }),
+      qr: id => navigate('qrDisplay', { id, dari: 'absenHarian' }),
+      kartu: id => navigate('scanKartu', { id, dari: 'absenHarian' }),
+      kiosk: id => navigate('kiosk', { id, dari: 'absenHarian' }),
+      detail: id => navigate('detailSesi', { id, dari: 'absenHarian' }),
+      tutup: async id => {
+        if (!await confirmDlg('Tutup absen harian sekarang? Siswa yang belum absen langsung tercatat <b>Alpha</b>.', 'Tutup', 'danger')) return;
+        const r = await api('closeSesi', { id }); toast('Ditutup. ' + r.alpha + ' siswa tercatat Alpha.', 'success'); load();
+      },
+      mode: id => {
+        const k = d.kelas.find(x => x.id === id);
+        formModal({
+          title: 'Mode Absensi ' + k.nama_kelas, values: { mode: k.mode },
+          intro: '<p class="small text-muted">Sebaiknya ditentukan di awal semester. Bila diganti di tengah semester, persentase kehadiran di laporan mengikuti mode terbaru.</p>',
+          fields: [{ name: 'mode', label: 'Mode', type: 'select', placeholder: false, options: MODE_OPSI }],
+          onSubmit: async f => { await api('setModeKelas', { kelas_id: id, mode: f.mode }); toast('Mode absensi ' + k.nama_kelas + ': ' + MODE_LABEL[f.mode], 'success'); S.master = null; load(); }
+        });
+      },
+      libur: () => liburDlg()
+    });
+    await load();
+    every(() => { if (!document.hidden && !$('.modal.show')) load(true).catch(() => { }); }, 30000);
+  }
+};
+
+/** Admin: daftar & tambah hari libur (tanggal merah, libur semester, kegiatan) */
+async function liburDlg() {
+  const list = await api('listLibur', {});
+  const el = modal({
+    title: 'Hari Libur', size: 'lg',
+    body: '<form id="lbForm" class="row g-2 align-items-end mb-3">' +
+      fieldHtml({ name: 'tanggal', label: 'Tanggal', type: 'date', required: true, col: 'col-md-3' }) +
+      fieldHtml({ name: 'sampai', label: 'Sampai (opsional)', type: 'date', col: 'col-md-3' }) +
+      fieldHtml({ name: 'keterangan', label: 'Keterangan', placeholder: 'mis. Maulid Nabi', col: 'col-md-4' }) +
+      '<div class="col-md-2 mb-2"><button class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i> Tambah</button></div></form>' +
+      '<div id="lbList"></div><div class="small text-muted mt-2">Pada hari libur absen harian tidak bisa dibuka, sehingga siswa tidak tercatat Alpha. Hari Minggu/Sabtu diatur di Pengaturan → Hari sekolah.</div>'
+  });
+  const draw = rows => {
+    $('#lbList', el).innerHTML = tableHtml([
+      { h: 'Tanggal', f: r => tglPanjang(r.tanggal) },
+      { h: 'Keterangan', f: r => esc(r.keterangan || '-') },
+      { h: '', cls: 'text-end', f: r => '<button type="button" class="btn btn-sm btn-outline-danger" data-hapus="' + r.tanggal + '"><i class="bi bi-trash"></i></button>' }
+    ], rows, { empty: 'Belum ada hari libur' });
+    $$('[data-hapus]', el).forEach(b => b.onclick = async () => { await api('hapusLibur', { tanggal: b.dataset.hapus }); draw(await api('listLibur', {}, { silent: true })); });
+  };
+  draw(list);
+  $('#lbForm', el).onsubmit = async e => {
+    e.preventDefault();
+    const r = await api('saveLibur', readForm(e.target));
+    toast(r.jumlah + ' hari libur disimpan', 'success'); e.target.reset();
+    draw(await api('listLibur', {}, { silent: true }));
+  };
+}
 </script>
 
 <script>
@@ -3063,7 +3223,8 @@ VIEWS.dashGuru = {
     await swr('dashGuru', 'dashboardGuru', {}, d => {
     if (!el.isConnected) return;
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini',
-      '<button class="btn btn-primary btn-sm" data-go="absensiGuru"><i class="bi bi-qr-code"></i> Buka Absensi</button>') +
+      (S.user.piket || (S.user.wali_kelas || []).length ? '<button class="btn btn-outline-primary btn-sm" data-go="absenHarian"><i class="bi bi-calendar-day"></i> Absen Harian</button>' : '') +
+      '<button class="btn btn-primary btn-sm" data-go="absensiGuru"><i class="bi bi-qr-code"></i> Absen Mapel</button>') +
       '<div class="row g-3 mb-3">' +
       statCard('calendar-check', 'Sesi absensi hari ini', d.sesi.length, 'primary', 'col-6 col-md-3') +
       statCard('pencil-square', 'Ujian berlangsung', d.ujian_aktif.length, 'success', 'col-6 col-md-3') +
