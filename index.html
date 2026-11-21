@@ -1410,11 +1410,19 @@ function camBox(id) {
 function setCamMsg(el, text, type) { if (!el) return; el.textContent = text; el.className = 'cam-msg' + (type ? ' ' + type : ''); }
 
 /* ---------------- Pemindai QR (html5-qrcode) ---------------- */
+/* Pemindai QR + pengaturan kamera (depan/belakang & cermin), pilihan diingat per perangkat */
 const QRS = {
-  inst: null, busy: false,
+  inst: null, busy: false, elId: null, onCode: null, cams: null, camIdx: -1,
+  pref: (() => { try { return JSON.parse(localStorage.getItem('qrsPref') || '{}'); } catch (e) { return {}; } })(),
+  simpan() { try { localStorage.setItem('qrsPref', JSON.stringify(this.pref)); } catch (e) { } },
+  sentuh: () => matchMedia('(pointer:coarse)').matches,
+  facing() { return this.pref.facing || 'environment'; },
+  // Default cermin: aktif untuk kamera depan & webcam laptop (yang memang menghadap pengguna)
+  cermin() { return typeof this.pref.mirror === 'boolean' ? this.pref.mirror : (this.pref.deviceId ? !this.sentuh() : (this.facing() === 'user' || !this.sentuh())); },
   async start(elId, onCode) {
     await loadScript(QR_LIB);
     await this.stop();
+    this.elId = elId; this.onCode = onCode;
     // Hanya format QR + pakai BarcodeDetector bawaan browser bila tersedia (jauh lebih cepat)
     this.inst = new Html5Qrcode(elId, {
       formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
@@ -1423,14 +1431,56 @@ const QRS = {
     });
     this.busy = false;
     onLeave(() => this.stop());
-    try {
-      await this.inst.start({ facingMode: 'environment' },
-        { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
-        txt => { if (this.busy) return; this.busy = true; onCode(txt); }, () => { });
-    } catch (e) { throw new Error(camErr(e)); }
+    const cfg = { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } };
+    const cb = txt => { if (this.busy) return; this.busy = true; onCode(txt); };
+    const kam = this.pref.deviceId || { facingMode: this.facing() };
+    try { await this.inst.start(kam, cfg, cb, () => { }); }
+    catch (e) {
+      if (this.pref.deviceId) { // kamera tersimpan sudah tidak ada → kembali ke mode depan/belakang
+        delete this.pref.deviceId; this.simpan();
+        try { await this.inst.start({ facingMode: this.facing() }, cfg, cb, () => { }); } catch (e2) { throw new Error(camErr(e2)); }
+      } else throw new Error(camErr(e));
+    }
+    this.terapkanCermin(); this.panel();
+  },
+  terapkanCermin() {
+    const v = document.querySelector('#' + this.elId + ' video');
+    if (v) v.style.transform = this.cermin() ? 'scaleX(-1)' : 'none';
+  },
+  panel() {
+    const box = document.getElementById(this.elId); if (!box) return;
+    let c = document.getElementById(this.elId + 'Ctl');
+    if (!c) { c = document.createElement('div'); c.id = this.elId + 'Ctl'; c.className = 'qrs-ctl d-flex justify-content-center gap-2 flex-wrap mt-2'; box.after(c); }
+    const depan = (this.pref.deviceId || !this.sentuh()) ? null : this.facing() === 'user';
+    c.innerHTML = '<button type="button" class="btn btn-outline-secondary btn-sm" data-qrs="flip"><i class="bi bi-arrow-repeat"></i> ' +
+      (depan === null ? 'Ganti kamera' : 'Kamera: ' + (depan ? 'Depan' : 'Belakang')) + '</button>' +
+      '<button type="button" class="btn btn-sm ' + (this.cermin() ? 'btn-secondary' : 'btn-outline-secondary') + '" data-qrs="mirror"><i class="bi bi-symmetry-vertical"></i> Cermin: ' + (this.cermin() ? 'Aktif' : 'Mati') + '</button>';
+    c.querySelector('[data-qrs=flip]').onclick = () => this.gantiKamera();
+    c.querySelector('[data-qrs=mirror]').onclick = () => { this.pref.mirror = !this.cermin(); this.simpan(); this.terapkanCermin(); this.panel(); };
+  },
+  async gantiKamera() {
+    if (!this.elId) return;
+    try { if (!this.cams) this.cams = await Html5Qrcode.getCameras(); } catch (e) { this.cams = []; }
+    if (this.cams.length === 1) return toast('Perangkat ini hanya punya satu kamera', 'info');
+    const berlabel = this.cams.some(c => /back|rear|belakang|environment|front|depan|user|facing/i.test(c.label || ''));
+    if (this.sentuh() || berlabel || !this.cams.length) {
+      // HP/tablet: tukar kamera depan ↔ belakang
+      this.pref.facing = this.facing() === 'user' ? 'environment' : 'user'; delete this.pref.deviceId;
+      toast(this.pref.facing === 'user' ? 'Kamera depan' : 'Kamera belakang', 'info');
+    } else {
+      // Laptop/PC dengan beberapa webcam: pindah ke kamera berikutnya
+      const now = this.cams.findIndex(c => c.id === this.pref.deviceId);
+      const ix = now < 0 ? 1 : (now + 1) % this.cams.length; // kamera bawaan biasanya urutan pertama
+      const nx = this.cams[ix];
+      this.pref.deviceId = nx.id; toast(nx.label || 'Kamera ' + (ix + 1), 'info');
+    }
+    delete this.pref.mirror; // cermin kembali ke default kamera baru; masih bisa diubah
+    this.simpan();
+    try { await this.start(this.elId, this.onCode); } catch (e) { toast(e.message, 'danger'); }
   },
   async stop() {
     const i = this.inst; this.inst = null;
+    if (this.elId) { const c = document.getElementById(this.elId + 'Ctl'); if (c) c.remove(); }
     try { if (i && i.isScanning) await i.stop(); if (i) i.clear(); } catch (e) { }
   },
   async scanFile(file) {
