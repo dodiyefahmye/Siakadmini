@@ -208,10 +208,10 @@ const HOME = { admin: 'dashAdmin', guru: 'dashGuru', siswa: 'dashSiswa' };
 const ROLE_LABEL = { admin: 'Administrator', guru: 'Guru', siswa: 'Siswa' };
 const JENIS_LABEL = { KUIS_BULANAN: 'Kuis Bulanan', UTS: 'UTS', UAS: 'UAS' };
 const MENUS = {
-  admin: [['dashAdmin', 'speedometer2', 'Dashboard'], ['users', 'people', 'Pengguna'], ['master', 'diagram-3', 'Kelas & Mapel'],
+  admin: [['dashAdmin', 'speedometer2', 'Dashboard'], ['users', 'people', 'Pengguna'], ['master', 'diagram-3', 'Kelas & Mapel'], ['jadwal', 'calendar-week', 'Jadwal Pelajaran'],
     ['absenHarian', 'calendar-day', 'Absen Harian'], ['absensiGuru', 'qr-code', 'Absen Mapel'], ['bankSoal', 'journal-text', 'Bank Soal'], ['ujianGuru', 'pencil-square', 'Ujian / CBT'],
     ['laporan', 'bar-chart-line', 'Laporan'], ['auditLog', 'clock-history', 'Log Aktivitas'], ['pengaturan', 'gear', 'Pengaturan']],
-  guru: [['dashGuru', 'speedometer2', 'Dashboard'], ['absenHarian', 'calendar-day', 'Absen Harian'], ['absensiGuru', 'qr-code', 'Absen Mapel'], ['bankSoal', 'journal-text', 'Bank Soal'],
+  guru: [['dashGuru', 'speedometer2', 'Dashboard'], ['absenHarian', 'calendar-day', 'Absen Harian'], ['absensiGuru', 'qr-code', 'Absen Mapel'], ['jadwal', 'calendar-week', 'Jadwal Saya'], ['bankSoal', 'journal-text', 'Bank Soal'],
     ['ujianGuru', 'pencil-square', 'Ujian / CBT'], ['laporan', 'bar-chart-line', 'Laporan']],
   siswa: [['dashSiswa', 'house', 'Beranda'], ['absenSiswa', 'qr-code-scan', 'Absen'], ['ujianSiswa', 'pencil-square', 'Ujian'],
     ['laporanSiswa', 'bar-chart-line', 'Nilai'], ['wajah', 'person-bounding-box', 'Wajah']]
@@ -1726,8 +1726,9 @@ VIEWS.absensiGuru = {
     el.innerHTML = pageHead('Absen per Mata Pelajaran', 'Buka sesi tiap jam pelajaran, tampilkan QR di layar/proyektor, scan kartu, atau mode kiosk wajah',
       '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu QR</button>' +
       '<button class="btn btn-outline-primary btn-sm" data-act="kiosk"><i class="bi bi-person-bounding-box"></i> Mode Kiosk</button>' +
-      '<button class="btn btn-primary btn-sm" data-act="open"><i class="bi bi-plus-lg"></i> Buka Sesi</button>') +
-      '<div class="card"><div class="card-body"><div class="row g-2 mb-3"><div class="col-auto"><input type="date" class="form-control" id="fTgl" value="' + tgl + '"></div>' +
+      '<button class="btn btn-outline-primary btn-sm" data-act="open" title="Untuk kegiatan di luar jadwal"><i class="bi bi-plus-lg"></i> Sesi Manual</button>') +
+      '<div id="jhiBox" class="mb-3"></div>' +
+      '<div class="card"><div class="card-header small fw-semibold">Riwayat sesi</div><div class="card-body"><div class="row g-2 mb-3"><div class="col-auto"><input type="date" class="form-control" id="fTgl" value="' + tgl + '"></div>' +
       '<div class="col-auto"><button class="btn btn-light" data-act="all">Tampilkan semua</button></div><div class="col-auto"><button class="btn btn-light" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button></div></div>' +
       '<div id="sList">' + spinner() + '</div></div></div>';
     let rows = [];
@@ -1785,6 +1786,7 @@ VIEWS.absensiGuru = {
       }
     });
     $('#fTgl', el).onchange = e => { tgl = e.target.value; load(); };
+    jadwalHariIniBox($('#jhiBox', el), 'absensiGuru');
     load();
   }
 };
@@ -2402,6 +2404,236 @@ async function liburDlg() {
     const r = await api('saveLibur', readForm(e.target));
     toast(r.jumlah + ' hari libur disimpan', 'success'); e.target.reset();
     draw(await api('listLibur', {}, { silent: true }));
+  };
+}
+</script>
+
+<script>
+/* =============================================================
+ * ViewsJadwal.html — Jadwal Pelajaran (per semester)
+ *  - Admin: susun jadwal (grid mingguan per kelas / per guru), impor dari Excel, kosongkan
+ *  - Guru : "Jadwal Saya" (baca saja) + panel "Jadwal Hari Ini" dengan tombol Mulai sekali ketuk
+ *  - Siswa: jadwal hari ini di beranda
+ * ============================================================= */
+
+const NAMA_HARI = ['', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+
+/** Jam dari sel Excel/teks → 'HH:MM' (Excel menyimpan jam sebagai pecahan hari atau objek Date) */
+function jamSel(v) {
+  if (v instanceof Date) return String(v.getHours()).padStart(2, '0') + ':' + String(v.getMinutes()).padStart(2, '0');
+  if (typeof v === 'number' && v >= 0 && v < 1) { const m = Math.round(v * 1440); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+  return String(v == null ? '' : v).trim();
+}
+
+/** Halaman layar sesi sesuai metode absen */
+function bukaLayarSesi(id, metode, dari) {
+  navigate(metode === 'FACE' ? 'kiosk' : metode === 'KARTU' ? 'scanKartu' : 'qrDisplay', { id, dari });
+}
+
+/* ---------------- PANEL "JADWAL HARI INI" (dashboard guru & Absen Mapel) ---------------- */
+async function jadwalHariIniBox(box, dari) {
+  if (!box) return;
+  let semua = false, d = null;
+  const metode = () => store.get('metodeJadwal') || 'QR_KARTU';
+  async function load(diam) {
+    try { d = await api('jadwalHariIni', { semua }, { silent: true, quiet: !!diam }); } catch (e) { if (!d) box.innerHTML = ''; return; }
+    draw();
+  }
+  function status(i) {
+    const x = i.sesi;
+    if (i.mode_kelas === 'HARIAN') return '<span class="small text-muted">Kelas memakai absen harian</span>';
+    if (x) {
+      return badge(x.status, null, x.status === 'AKTIF' ? 'Dibuka' : x.status === 'SELESAI' ? 'Selesai' : x.status) + ' <span class="small"><b>' + x.hadir + '</b>/' + x.total + ' hadir</span>' +
+        '<div class="mt-1">' +
+        (x.status === 'AKTIF' && metodeBoleh(x.metode, 'QR') ? actBtn('jqr', x.id, 'qr-code', 'Tampilkan QR', 'outline-primary') + ' ' : '') +
+        (x.status === 'AKTIF' && metodeBoleh(x.metode, 'KARTU') ? actBtn('jkartu', x.id, 'upc-scan', 'Scan kartu', 'outline-success') + ' ' : '') +
+        (x.status === 'AKTIF' && metodeBoleh(x.metode, 'FACE') ? actBtn('jkiosk', x.id, 'person-bounding-box', 'Kiosk wajah', 'outline-primary') + ' ' : '') +
+        actBtn('jdetail', x.id, 'list-check', 'Daftar hadir') + '</div>';
+    }
+    if (d.libur) return '<span class="small text-muted">Libur</span>';
+    if (i.fase === 'BISA') return '<button class="btn btn-sm ' + (i.milik ? 'btn-primary' : 'btn-outline-warning') + '" data-act="jmulai" data-id="' + i.id + '"><i class="bi bi-play-fill"></i> ' + (i.milik ? 'Mulai' : 'Gantikan') + '</button>';
+    if (i.fase === 'NANTI') return '<span class="small text-muted">Bisa dimulai 15 menit sebelum ' + esc(i.jam_mulai) + '</span>';
+    return badge('Tidak dibuka', 'secondary');
+  }
+  function draw() {
+    if (!box.isConnected) return;
+    const items = d.items;
+    box.innerHTML = '<div class="card"><div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">' +
+      '<span><i class="bi bi-calendar-week"></i> Jadwal ' + (semua ? 'Semua Guru' : 'Saya') + ' Hari Ini · ' + esc(d.hari) + '</span>' +
+      '<span class="d-flex gap-2 align-items-center"><a href="#" class="small" data-act="jmetode" title="Cara absen saat menekan Mulai"><i class="bi bi-sliders"></i> ' + esc(METODE_LABEL[metode()] || metode()) + '</a>' +
+      (S.user.role === 'guru' ? '<button class="btn btn-sm btn-outline-secondary" data-act="jsemua">' + (semua ? 'Jadwal saya' : 'Gantikan guru lain') + '</button>' : '') + '</span></div>' +
+      '<div class="card-body p-2">' + (d.libur ? '<div class="alert alert-warning small py-2 mb-2">' + esc(d.libur) + '</div>' : '') +
+      (items.length ? '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><tbody>' + items.map(i =>
+        '<tr class="' + (i.fase === 'BISA' && !i.sesi ? 'table-primary' : '') + '"><td class="text-nowrap fw-semibold" style="width:110px">' + esc(i.jam_mulai + '–' + i.jam_selesai) + '</td>' +
+        '<td><b>' + esc(i.kelas) + '</b> · ' + esc(i.mapel) + (i.ruang ? ' <span class="small text-muted">(' + esc(i.ruang) + ')</span>' : '') +
+        (!i.milik ? '<div class="small text-muted">Guru: ' + esc(i.guru) + (i.sesi ? ' · dibuka oleh ' + esc(i.sesi.pembuka) : '') + '</div>' : '') + '</td>' +
+        '<td class="text-end">' + status(i) + '</td></tr>').join('') + '</tbody></table></div>'
+        : '<div class="text-muted small p-2">' + (semua ? 'Tidak ada jadwal pelajaran hari ini.' : 'Tidak ada jam mengajar Anda hari ini.') + '</div>') +
+      '</div></div>';
+  }
+  async function mulai(id) {
+    const i = d.items.find(x => x.id === id);
+    if (!i.milik && S.user.role !== 'admin' && !await confirmDlg('Gantikan <b>' + esc(i.guru) + '</b> mengajar <b>' + esc(i.kelas + ' · ' + i.mapel) + '</b> (' + esc(i.jam_mulai + '–' + i.jam_selesai) + ')? Anda tercatat sebagai pembuka sesi.', 'Ya, gantikan')) return;
+    const r = await api('mulaiJadwal', { jadwal_id: id, metode: metode(), pengganti: !i.milik });
+    toast(r.sudah ? 'Sesi sudah dibuka sebelumnya' : 'Absen ' + i.mapel + ' ' + i.kelas + ' dibuka', 'success');
+    bukaLayarSesi(r.id, r.metode, dari);
+  }
+  box.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]'); if (!b || !box.contains(b)) return;
+    const a = b.dataset.act, id = b.dataset.id;
+    if (!/^j/.test(a)) return;
+    e.preventDefault(); e.stopPropagation();
+    if (a === 'jmulai') mulai(id).catch(() => { });
+    else if (a === 'jsemua') { semua = !semua; load(); }
+    else if (a === 'jqr') navigate('qrDisplay', { id, dari });
+    else if (a === 'jkartu') navigate('scanKartu', { id, dari });
+    else if (a === 'jkiosk') navigate('kiosk', { id, dari });
+    else if (a === 'jdetail') navigate('detailSesi', { id, dari });
+    else if (a === 'jmetode') formModal({
+      title: 'Cara absen saat menekan Mulai', values: { metode: metode() },
+      intro: '<p class="small text-muted">Pilihan ini diingat di perangkat ini.</p>',
+      fields: [{ name: 'metode', label: 'Metode', type: 'select', placeholder: false, options: METODE_OPSI }],
+      onSubmit: async f => { store.set('metodeJadwal', f.metode); draw(); }
+    });
+  });
+  box.innerHTML = '<div class="card"><div class="card-body text-center text-muted small py-3">Memuat jadwal hari ini…</div></div>';
+  await load();
+  every(() => { if (!document.hidden && !$('.modal.show')) load(true); }, 60000);
+}
+
+/* ---------------- HALAMAN JADWAL PELAJARAN ---------------- */
+VIEWS.jadwal = {
+  title: 'Jadwal Pelajaran',
+  render: async function (el) {
+    await getMaster(true);
+    const admin = S.user.role === 'admin';
+    let per = admin ? 'kelas' : 'guru', pilih = admin ? (store.get('jadwalKelas') || (S.master.kelas[0] || {}).id || '') : S.user.id, d = null;
+    el.innerHTML = pageHead(admin ? 'Jadwal Pelajaran' : 'Jadwal Saya', 'Memuat…') + spinner();
+    async function load() {
+      await getMaster();
+      d = await api('listJadwal', per === 'kelas' ? { kelas_id: pilih } : { guru_id: pilih }, { silent: true });
+      draw();
+    }
+    function draw() {
+      const hari = d.hari_sekolah.split(',').map(Number).filter(h => h >= 1 && h <= 7);
+      d.items.forEach(j => { if (hari.indexOf(j.hari) < 0) hari.push(j.hari); });
+      hari.sort();
+      const opsi = per === 'kelas' ? kelasOpts() : guruOpts();
+      el.innerHTML = pageHead(admin ? 'Jadwal Pelajaran' : 'Jadwal Saya', 'Semester ' + d.semester + ' · ' + d.jumlah_total + ' jam pelajaran terjadwal di semua kelas',
+        admin ? '<button class="btn btn-outline-danger btn-sm" data-act="kosong"><i class="bi bi-trash"></i> Kosongkan</button>' +
+          '<button class="btn btn-outline-success btn-sm" data-act="impor"><i class="bi bi-file-earmark-excel"></i> Impor</button>' +
+          '<button class="btn btn-primary btn-sm" data-act="tambah"><i class="bi bi-plus-lg"></i> Tambah</button>' : '') +
+        (admin ? '<div class="card mb-3"><div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">' +
+          '<div class="btn-group btn-group-sm"><button class="btn ' + (per === 'kelas' ? 'btn-primary' : 'btn-outline-primary') + '" data-act="per" data-id="kelas">Per kelas</button>' +
+          '<button class="btn ' + (per === 'guru' ? 'btn-primary' : 'btn-outline-primary') + '" data-act="per" data-id="guru">Per guru</button></div>' +
+          '<select class="form-select form-select-sm" style="max-width:280px" id="jdPilih">' + optionsHtml(opsi, pilih, false) + '</select></div></div>' : '') +
+        (d.items.length ? '' : '<div class="alert alert-info small">' + (admin ? 'Belum ada jadwal untuk pilihan ini. Klik <b>Tambah</b> atau <b>Impor</b> dari Excel.' : 'Belum ada jadwal mengajar Anda di semester ini.') + '</div>') +
+        '<div class="row g-2">' + hari.map(h => {
+          const isi = d.items.filter(j => j.hari === h);
+          return '<div class="col-md-6 col-lg-4 col-xl-2"><div class="card h-100"><div class="card-header py-1 fw-semibold small">' + NAMA_HARI[h] + ' <span class="text-muted fw-normal">(' + isi.length + ')</span></div><div class="card-body p-2">' +
+            (isi.length ? isi.map(j => '<div class="border rounded p-2 mb-2 small' + (admin ? ' jadwal-item' : '') + '"' + (admin ? ' role="button" data-act="ubah" data-id="' + j.id + '"' : '') + '>' +
+              '<div class="fw-bold">' + esc(j.jam_mulai + '–' + j.jam_selesai) + '</div><div>' + esc(j.mapel) + '</div>' +
+              '<div class="text-muted">' + esc(per === 'kelas' ? j.guru : j.kelas) + (j.ruang ? ' · ' + esc(j.ruang) : '') + '</div></div>').join('')
+              : '<div class="text-muted small">—</div>') +
+            (admin ? '<button class="btn btn-sm btn-light w-100" data-act="tambahHari" data-id="' + h + '"><i class="bi bi-plus"></i></button>' : '') + '</div></div></div>';
+        }).join('') + '</div>';
+      const sel = $('#jdPilih', el);
+      if (sel) sel.onchange = e => { pilih = e.target.value; if (per === 'kelas') store.set('jadwalKelas', pilih); load(); };
+    }
+    const form = (j, preset) => {
+      j = j || Object.assign({ kelas_id: per === 'kelas' ? pilih : '', guru_id: per === 'guru' ? pilih : '', hari: '1', jam_mulai: '07:00', jam_selesai: '08:20' }, preset || {});
+      formModal({
+        title: j.id ? 'Ubah Jadwal' : 'Tambah Jadwal', values: Object.assign({}, j, { hari: String(j.hari) }),
+        fields: [
+          { name: 'id', type: 'hidden' },
+          { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), required: true, col: 'col-md-6' },
+          { name: 'hari', label: 'Hari', type: 'select', placeholder: false, options: [1, 2, 3, 4, 5, 6, 7].map(h => [String(h), NAMA_HARI[h]]), col: 'col-md-6' },
+          { name: 'jam_mulai', label: 'Jam mulai', type: 'time', required: true, col: 'col-6 col-md-3' },
+          { name: 'jam_selesai', label: 'Jam selesai', type: 'time', required: true, col: 'col-6 col-md-3' },
+          { name: 'ruang', label: 'Ruang (opsional)', col: 'col-md-6' },
+          { name: 'mapel_id', label: 'Mata pelajaran', type: 'select', options: mapelOpts(), required: true, col: 'col-md-6' },
+          { name: 'guru_id', label: 'Guru', type: 'select', options: guruOpts(), col: 'col-md-6', help: 'Otomatis terisi guru pengampu mapel' }
+        ],
+        onRender: f => {
+          f.mapel_id.addEventListener('change', () => { const m = S.master.mapel.find(x => x.id === f.mapel_id.value); if (m && m.guru_id) f.guru_id.value = m.guru_id; });
+          if (j.id) {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-outline-danger me-auto'; b.innerHTML = '<i class="bi bi-trash"></i> Hapus';
+            b.onclick = async () => { if (!await confirmDlg('Hapus jadwal ' + esc(j.nama_hari + ' ' + j.jam_mulai + ' ' + j.mapel + ' (' + j.kelas + ')') + '?', 'Hapus', 'danger')) return; await api('hapusJadwal', { id: j.id }); toast('Jadwal dihapus', 'success'); load(); };
+            $('#appModal .modal-footer').prepend(b);
+          }
+        },
+        onSubmit: async v => { await api('saveJadwal', v); toast('Jadwal disimpan', 'success'); load(); }
+      });
+    };
+    bindActs(el, {
+      per: async v => { await getMaster(); per = v; pilih = v === 'kelas' ? (store.get('jadwalKelas') || (S.master.kelas[0] || {}).id || '') : ((S.master.guru.find(g => g.role === 'guru') || S.master.guru[0] || {}).id || ''); load(); },
+      tambah: () => form(),
+      tambahHari: h => form(null, { hari: h }),
+      ubah: id => form(d.items.find(x => x.id === id)),
+      impor: () => imporJadwalDlg(load),
+      kosong: async () => {
+        const kls = per === 'kelas' ? S.master.kelas.find(k => k.id === pilih) : null;
+        formModal({
+          title: 'Kosongkan Jadwal', submitText: 'Kosongkan',
+          intro: '<div class="alert alert-danger small">Menghapus jadwal semester ' + esc(d.semester) + '. Riwayat absensi yang sudah tercatat tidak ikut terhapus.</div>',
+          fields: [
+            { name: 'lingkup', label: 'Yang dihapus', type: 'select', placeholder: false, options: (kls ? [['kelas', 'Jadwal kelas ' + kls.nama_kelas + ' saja']] : []).concat([['semua', 'SELURUH jadwal semua kelas']]) },
+            { name: 'konfirmasi', label: 'Ketik HAPUS untuk konfirmasi', required: true }
+          ],
+          onSubmit: async f => {
+            const r = await api('kosongkanJadwal', { konfirmasi: f.konfirmasi.trim().toUpperCase(), kelas_id: f.lingkup === 'kelas' ? pilih : '' });
+            toast(r.dihapus + ' jadwal dihapus', 'success'); load();
+          }
+        });
+      }
+    });
+    await load();
+  }
+};
+
+/** Impor jadwal dari Excel/CSV atau tempel dari spreadsheet */
+function imporJadwalDlg(onDone) {
+  const kolom = { kelas: ['kelas', 'rombel', 'rombongan belajar'], hari: ['hari'], jam_mulai: ['jam mulai', 'mulai', 'jam_mulai', 'dari'],
+    jam_selesai: ['jam selesai', 'selesai', 'jam_selesai', 'sampai'], mapel: ['mapel', 'mata pelajaran', 'pelajaran'], guru: ['guru', 'nip', 'pengajar', 'username guru'], ruang: ['ruang', 'ruangan'] };
+  const urutan = ['kelas', 'hari', 'jam_mulai', 'jam_selesai', 'mapel', 'guru', 'ruang'];
+  let baris = [];
+  const el = modal({
+    title: 'Impor Jadwal Pelajaran', size: 'xl',
+    body: '<p class="small mb-2">Siapkan tabel dengan kolom berikut (baris judul boleh ada, urutan bebas bila ada judul). Hari: Senin–Minggu. Guru: username/NIP atau nama persis seperti di aplikasi.</p>' +
+      '<div class="table-responsive"><table class="table table-sm table-bordered small mb-2"><tr class="table-light"><th>Kelas</th><th>Hari</th><th>Jam Mulai</th><th>Jam Selesai</th><th>Mapel</th><th>Guru</th><th>Ruang</th></tr>' +
+      '<tr><td>VII-A</td><td>Senin</td><td>07:30</td><td>08:50</td><td>Matematika</td><td>198501012010</td><td>R.7A</td></tr>' +
+      '<tr><td>VII-A</td><td>Senin</td><td>08:50</td><td>10:10</td><td>Bahasa Indonesia</td><td>Siti Aminah, S.Pd.</td><td></td></tr></table></div>' +
+      '<div class="row g-2 mb-2"><div class="col-md-6"><label class="form-label small fw-semibold mb-1">File Excel / CSV</label><input type="file" class="form-control" id="ijFile" accept=".xlsx,.xls,.csv"></div>' +
+      '<div class="col-md-6"><label class="form-label small fw-semibold mb-1">…atau tempel dari spreadsheet</label><textarea id="ijText" class="form-control font-monospace small" rows="2" placeholder="Tempel di sini…"></textarea></div></div>' +
+      '<div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="ijGanti"><label class="form-check-label small" for="ijGanti">Ganti seluruh jadwal semester ini (hapus jadwal lama lalu impor)</label></div>' +
+      '<div class="small text-muted mb-2">Kelas harus sudah ada. Mapel yang belum ada dibuat otomatis. Baris yang bentrok (kelas/guru di jam yang sama) dilewati dengan keterangan.</div>' +
+      '<div id="ijPrev" class="small"></div><div id="ijRes" class="mt-2"></div>',
+    footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button><button class="btn btn-primary" id="ijGo" disabled><i class="bi bi-upload"></i> Impor</button>'
+  });
+  const siapkan = aoa => {
+    aoa = aoa.filter(r => r.some(c => String(c == null ? '' : c).trim() !== ''));
+    let map = null;
+    if (aoa.length) {
+      const head = aoa[0].map(c => String(c == null ? '' : c).trim().toLowerCase());
+      const m = {}; Object.keys(kolom).forEach(k => { const i = head.findIndex(h => kolom[k].indexOf(h) >= 0); if (i >= 0) m[k] = i; });
+      if (m.kelas !== undefined && m.hari !== undefined) { map = m; aoa = aoa.slice(1); }
+    }
+    if (!map) { map = {}; urutan.forEach((k, i) => map[k] = i); }
+    baris = aoa.map(r => { const o = {}; urutan.forEach(k => { const v = map[k] === undefined ? '' : r[map[k]]; o[k] = k.indexOf('jam') === 0 ? jamSel(v) : String(v == null ? '' : v).trim(); }); return o; });
+    $('#ijPrev', el).innerHTML = baris.length ? '<b>' + baris.length + ' baris siap diimpor.</b> Contoh: ' + baris.slice(0, 3).map(b => esc(b.kelas + ' ' + b.hari + ' ' + b.jam_mulai + '–' + b.jam_selesai + ' ' + b.mapel)).join(' · ') : '<span class="text-danger">Tidak ada baris terbaca.</span>';
+    $('#ijGo', el).disabled = !baris.length;
+  };
+  $('#ijFile', el).onchange = async e => { const f = e.target.files[0]; if (!f) return; try { siapkan(await bacaFileTabel(f)); } catch (err) { toast('File tidak dapat dibaca: ' + err.message, 'danger'); } };
+  $('#ijText', el).oninput = e => siapkan(parseTSV(e.target.value));
+  $('#ijGo', el).onclick = async () => {
+    const ganti = $('#ijGanti', el).checked;
+    const btn = $('#ijGo', el); btn.disabled = true;
+    try {
+      const r = await api('importJadwal', { rows: baris, ganti });
+      $('#ijRes', el).innerHTML = '<div class="alert alert-success small py-2 mb-2">' + r.ditambah + ' jadwal ditambahkan' + (r.mapel_baru ? ', ' + r.mapel_baru + ' mapel baru dibuat' : '') + '.</div>' +
+        (r.errors.length ? '<div class="alert alert-warning small py-2" style="max-height:200px;overflow:auto"><b>' + r.errors.length + ' baris dilewati:</b><br>' + r.errors.map(esc).join('<br>') + '</div>' : '');
+      await getMaster(true); if (onDone) onDone();
+    } finally { btn.disabled = false; }
   };
 }
 </script>
@@ -3218,13 +3450,16 @@ const CHART_COLORS = ['#22c55e', '#facc15', '#38bdf8', '#a78bfa', '#ef4444', '#2
 VIEWS.dashGuru = {
   title: 'Dashboard',
   render: async function (el) {
-    el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini') + spinner();
-    bindActs(el, { qr: id => navigate('qrDisplay', { id }), kartu: id => navigate('scanKartu', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
-    await swr('dashGuru', 'dashboardGuru', {}, d => {
-    if (!el.isConnected) return;
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini',
       (S.user.piket || (S.user.wali_kelas || []).length ? '<button class="btn btn-outline-primary btn-sm" data-go="absenHarian"><i class="bi bi-calendar-day"></i> Absen Harian</button>' : '') +
       '<button class="btn btn-primary btn-sm" data-go="absensiGuru"><i class="bi bi-qr-code"></i> Absen Mapel</button>') +
+      '<div id="jhiBox" class="mb-3"></div><div id="dgBody">' + spinner() + '</div>';
+    $$('[data-go]', el).forEach(b => b.onclick = () => navigate(b.dataset.go));
+    bindActs(el, { qr: id => navigate('qrDisplay', { id }), kartu: id => navigate('scanKartu', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
+    jadwalHariIniBox($('#jhiBox', el), 'dashGuru');
+    await swr('dashGuru', 'dashboardGuru', {}, d => {
+    if (!el.isConnected) return;
+    $('#dgBody', el).innerHTML =
       '<div class="row g-3 mb-3">' +
       statCard('calendar-check', 'Sesi absensi hari ini', d.sesi.length, 'primary', 'col-6 col-md-3') +
       statCard('pencil-square', 'Ujian berlangsung', d.ujian_aktif.length, 'success', 'col-6 col-md-3') +
@@ -3244,7 +3479,6 @@ VIEWS.dashGuru = {
         { h: 'Selesai', f: u => u.selesai + '/' + u.jumlah_siswa + (u.terkunci ? ' ' + badge(u.terkunci + ' 🔒', 'danger') : '') },
         { h: '', cls: 'text-end', f: u => actBtn('mon', u.id, 'display', 'Monitoring', 'primary') }
       ], d.ujian_aktif, { empty: 'Tidak ada ujian yang sedang berlangsung' }) + '</div></div></div></div>';
-    $$('[data-go]', el).forEach(b => b.onclick = () => navigate(b.dataset.go));
     });
   }
 };
@@ -3426,6 +3660,10 @@ VIEWS.dashSiswa = {
       (belumAbsen.length ? '<div class="card border-start border-4 border-warning mb-3"><div class="card-body d-flex align-items-center gap-3"><i class="bi bi-alarm fs-2 text-warning"></i>' +
         '<div class="flex-grow-1"><b>Kamu belum absen!</b><div class="small text-muted">' + belumAbsen.map(x => esc(x.mapel)).join(', ') + '</div></div>' +
         '<button class="btn btn-warning" data-go="absenSiswa">Absen</button></div></div>' : '') +
+      ((d.jadwal || []).length ? '<div class="card mb-3"><div class="card-header"><i class="bi bi-calendar-week"></i> Jadwal Hari Ini</div><div class="card-body p-2"><table class="table table-sm align-middle mb-0"><tbody>' +
+        d.jadwal.map(j => '<tr><td class="text-nowrap fw-semibold" style="width:100px">' + esc(j.jam_mulai + '–' + j.jam_selesai) + '</td><td>' + esc(j.mapel) +
+          '<div class="small text-muted">' + esc(j.guru) + (j.ruang ? ' · ' + esc(j.ruang) : '') + '</div></td><td class="text-end">' +
+          (j.status ? badge(j.status) : j.sesi ? '<button class="btn btn-sm btn-warning" data-go="absenSiswa">Absen</button>' : '') + '</td></tr>').join('') + '</tbody></table></div></div>' : '') +
       (ujAktif.length ? '<div class="card border-start border-4 border-primary mb-3"><div class="card-body"><b><i class="bi bi-pencil-square"></i> Ujian tersedia</b>' +
         ujAktif.map(x => '<div class="d-flex justify-content-between align-items-center mt-2"><div>' + esc(x.judul) + '<div class="small text-muted">' + esc(x.mapel) + ' · ' + esc(x.durasi_menit) + ' menit</div></div>' +
           '<button class="btn btn-sm btn-primary" data-go="ujianSiswa">' + (x.sesi_status ? 'Lanjutkan' : 'Kerjakan') + '</button></div>').join('') + '</div></div>' : '') +
