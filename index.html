@@ -502,6 +502,7 @@ function renderShell() {
     '<span class="navbar-brand me-auto text-truncate"><i class="bi bi-mortarboard-fill"></i> ' + esc(S.settings.nama_sekolah || 'SIAKAD Mini') + '</span>' +
     '<div class="dropdown"><button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-person-circle"></i> <span class="d-none d-sm-inline">' + esc(u.nama) + '</span></button>' +
     '<ul class="dropdown-menu dropdown-menu-end"><li><h6 class="dropdown-header">' + esc(u.nama) + '<br><small>' + esc(ROLE_LABEL[u.role]) + (u.kelas ? ' · ' + esc(u.kelas) : '') + '</small></h6></li>' +
+    '<li><a class="dropdown-item" href="#" data-nav="profil"><i class="bi bi-person-vcard"></i> Profil Saya</a></li>' +
     '<li><a class="dropdown-item" href="#" data-nav="__password"><i class="bi bi-key"></i> Ganti Password</a></li>' +
     '<li><hr class="dropdown-divider"></li><li><a class="dropdown-item text-danger" href="#" data-nav="__logout"><i class="bi bi-box-arrow-right"></i> Keluar</a></li></ul></div>' +
     '</div></nav>' +
@@ -687,7 +688,7 @@ VIEWS.dashAdmin = {
     const totalHari = h.Hadir + h.Terlambat + h.Izin + h.Sakit + h.Alpha;
     $('#dz', el).innerHTML =
       '<div class="row g-3 mb-3">' +
-      statCard('people', 'Siswa aktif', d.siswa, 'primary') + statCard('person-badge', 'Guru', d.guru, 'info') +
+      statCard('people', 'Siswa aktif', d.siswa + (d.siswa_l || d.siswa_p ? '<div class="small fw-normal text-muted" style="font-size:.75rem">L ' + d.siswa_l + ' · P ' + d.siswa_p + '</div>' : ''), 'primary') + statCard('person-badge', 'Guru', d.guru, 'info') +
       statCard('diagram-3', 'Kelas', d.kelas, 'secondary') + statCard('journal-text', 'Soal di bank', d.soal, 'warning') +
       statCard('qr-code', 'Sesi absen aktif', d.sesi_aktif, 'success') + statCard('pencil-square', 'Ujian berlangsung', d.ujian_aktif, 'danger') +
       '</div><div class="row g-3"><div class="col-lg-8"><div class="card h-100"><div class="card-header">Tren Kehadiran 7 Hari Terakhir</div><div class="card-body"><div class="chart-box"><canvas id="cTren"></canvas></div></div></div></div>' +
@@ -724,7 +725,8 @@ VIEWS.users = {
     await getMaster(true);
     let role = 'siswa', rows = [], q = '', kelas = '';
     el.innerHTML = pageHead('Manajemen Pengguna', 'Akun siswa, guru, dan admin. Password awal akun baru = username.',
-      '<button class="btn btn-outline-primary btn-sm" data-act="import"><i class="bi bi-upload"></i> Import</button>' +
+      '<button class="btn btn-outline-success btn-sm" data-act="dapodik"><i class="bi bi-file-earmark-excel"></i> Import Dapodik</button>' +
+      '<button class="btn btn-outline-primary btn-sm" data-act="import"><i class="bi bi-clipboard"></i> Tempel</button>' +
       '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Tambah</button>') +
       '<div class="card"><div class="card-body">' +
       '<ul class="nav nav-pills mb-3" id="roleTabs">' + ['siswa', 'guru', 'admin'].map(r =>
@@ -734,6 +736,11 @@ VIEWS.users = {
       '<div class="col-md-3 text-md-end small text-muted align-self-center" id="ucount"></div></div>' +
       '<div id="utable">' + spinner() + '</div></div></div>';
 
+    async function refreshKelas() {
+      await getMaster(true);
+      $('#uk', el).innerHTML = optionsHtml(kelasOpts(), kelas, 'Semua kelas');
+      load();
+    }
     async function load() { $('#utable', el).innerHTML = spinner(); rows = await api('listUsers', { role }, { silent: true }); draw(); }
     function draw() {
       const list = rows.filter(u => (!q || (u.nama + ' ' + u.username).toLowerCase().includes(q)) && (!kelas || u.kelas_id === kelas));
@@ -741,6 +748,7 @@ VIEWS.users = {
       const cols = [
         { h: 'Username', f: u => '<code>' + esc(u.username) + '</code>' },
         { h: 'Nama', f: u => esc(u.nama) },
+        { h: 'L/P', cls: 'text-center', f: u => jkBadge(u.jk) },
       ];
       if (role === 'siswa') {
         cols.push({ h: 'Kelas', f: u => esc(u.kelas || '-') });
@@ -753,9 +761,14 @@ VIEWS.users = {
         actBtn('edit', u.id, 'pencil', 'Ubah') + ' ' + actBtn('del', u.id, 'trash', 'Hapus', 'outline-danger') });
       $('#utable', el).innerHTML = tableHtml(cols, list, { empty: 'Belum ada pengguna' });
     }
-    function userForm(u) {
+    async function userForm(u) {
       u = u || { role: role, status: 'AKTIF' };
-      formModal({
+      await getMaster(); // daftar kelas terbaru (mis. setelah import membuat kelas baru)
+      if (u.id) {
+        const p = await api('getProfil', { user_id: u.id });
+        ['jenis_kelamin', 'nisn', 'nip', 'tempat_lahir', 'tanggal_lahir', 'alamat', 'no_telepon', 'nama_wali', 'telepon_wali'].forEach(k => u[k] = p[k]);
+      }
+      formModal({ size: 'lg',
         title: u.id ? 'Ubah Pengguna' : 'Tambah Pengguna',
         values: u,
         fields: [
@@ -766,12 +779,12 @@ VIEWS.users = {
           { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), col: 'col-md-6' },
           { name: 'password', label: 'Password', type: 'password', help: u.id ? 'Kosongkan jika tidak diubah' : 'Kosongkan = sama dengan username', col: 'col-md-6', autocomplete: 'new-password' },
           { name: 'status', label: 'Status', type: 'select', options: [['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif']], placeholder: false, col: 'col-md-6' }
-        ],
+        ].concat(biodataFields()),
         onRender: form => {
-          const t = () => showField(form, 'kelas_id', form.role.value === 'siswa');
+          const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); toggleBiodata(form, form.role.value); };
           form.role.onchange = t; t();
         },
-        onSubmit: async d => { await api('saveUser', d); toast('Data pengguna disimpan', 'success'); S.master = null; load(); }
+        onSubmit: async d => { delete d._bio; await api('saveUser', d); toast('Data pengguna disimpan', 'success'); S.master = null; load(); }
       });
     }
     function importDlg() {
@@ -793,7 +806,7 @@ VIEWS.users = {
           const r = await api('importUsers', { rows: lines.map(c => ({ username: c[0], nama: c[1], role: c[2] || 'siswa', kelas: c[3], password: c[4] })) });
           $('#impRes', el2).innerHTML = '<div class="alert alert-success small py-2">Berhasil menambah ' + r.added + ' pengguna' + (r.kelas_baru ? ' dan ' + r.kelas_baru + ' kelas baru' : '') + '.</div>' +
             (r.errors.length ? '<div class="alert alert-warning small py-2" style="max-height:160px;overflow:auto">' + r.errors.map(esc).join('<br>') + '</div>' : '');
-          S.master = null; load();
+          await refreshKelas();
         } finally { btn.disabled = false; }
       };
     }
@@ -822,7 +835,8 @@ VIEWS.users = {
         if (!await confirmDlg('Izinkan <b>' + esc(u.nama) + '</b> mendaftarkan ulang wajahnya?')) return;
         await api('resetFace', { user_id: id }); toast('Siswa dapat mendaftar ulang wajah', 'success'); load();
       },
-      import: importDlg
+      import: importDlg,
+      dapodik: () => importDapodikDlg(refreshKelas)
     });
     $('#uq', el).oninput = e => { q = e.target.value.toLowerCase(); draw(); };
     $('#uk', el).onchange = e => { kelas = e.target.value; draw(); };
@@ -844,7 +858,8 @@ VIEWS.master = {
       M = await getMaster(true);
       $('#tKelas', el).innerHTML = tableHtml([
         { h: 'Kelas', f: k => '<b>' + esc(k.nama_kelas) + '</b>' }, { h: 'Wali kelas', f: k => esc(k.wali_kelas || '-') },
-        { h: 'Siswa', f: k => k.jumlah_siswa }, { h: 'TA', f: k => esc(k.tahun_ajaran) },
+        { h: 'Siswa', f: k => '<b>' + k.jumlah_siswa + '</b>' + (k.jumlah_l || k.jumlah_p ? ' <span class="small text-muted">(L ' + k.jumlah_l + ' · P ' + k.jumlah_p + ')</span>' : '') },
+        { h: 'TA', f: k => esc(k.tahun_ajaran) },
         { h: '', cls: 'text-end text-nowrap', f: k => actBtn('editKelas', k.id, 'pencil', 'Ubah') + ' ' + actBtn('delKelas', k.id, 'trash', 'Hapus', 'outline-danger') }
       ], M.kelas, { empty: 'Belum ada kelas' });
       $('#tMapel', el).innerHTML = tableHtml([
@@ -992,6 +1007,255 @@ VIEWS.auditLog = {
     load();
   }
 };
+</script>
+
+<script>
+/* =============================================================
+ * ViewsBiodata.html — Biodata pengguna, Profil Saya, Import Dapodik
+ * ============================================================= */
+
+const JK_LABEL = { L: 'Laki-laki', P: 'Perempuan' };
+function jkBadge(jk) { return jk ? '<span class="badge ' + (jk === 'L' ? 'text-bg-primary' : 'text-bg-danger') + ' bg-opacity-75">' + jk + '</span>' : '<span class="text-muted">-</span>'; }
+
+/** Kolom biodata untuk form tambah/ubah pengguna (ditampilkan sesuai role) */
+function biodataFields() {
+  return [
+    { type: 'html', name: '_bio', html: '<hr class="my-2"><div class="fw-semibold small text-primary mb-1"><i class="bi bi-person-vcard"></i> Biodata</div>' },
+    { name: 'jenis_kelamin', label: 'Jenis kelamin', type: 'select', options: [['L', 'Laki-laki'], ['P', 'Perempuan']], placeholder: '— pilih —', col: 'col-md-4' },
+    { name: 'nisn', label: 'NISN', col: 'col-md-4', help: 'Kosongkan jika sama dengan username' },
+    { name: 'nip', label: 'NIP', col: 'col-md-4' },
+    { name: 'tempat_lahir', label: 'Tempat lahir', col: 'col-md-4' },
+    { name: 'tanggal_lahir', label: 'Tanggal lahir', type: 'date', col: 'col-md-4' },
+    { name: 'no_telepon', label: 'No. HP', type: 'tel', col: 'col-md-4', placeholder: '08…' },
+    { name: 'alamat', label: 'Alamat', type: 'textarea', rows: 2 },
+    { name: 'nama_wali', label: 'Nama orang tua / wali', col: 'col-md-6' },
+    { name: 'telepon_wali', label: 'No. HP orang tua / wali', type: 'tel', col: 'col-md-6', placeholder: '08…' }
+  ];
+}
+function toggleBiodata(form, role) {
+  const siswa = role === 'siswa';
+  showField(form, 'nisn', siswa); showField(form, 'nip', !siswa);
+  showField(form, 'nama_wali', siswa); showField(form, 'telepon_wali', siswa);
+}
+
+/** Kartu biodata (dipakai guru/wali kelas, mis. dari daftar hadir) */
+async function showBiodata(userId) {
+  const p = await api('getProfil', { user_id: userId });
+  const row = (k, v, extra) => '<tr><th class="text-muted fw-normal small" style="width:40%">' + k + '</th><td>' + (v ? esc(v) : '<span class="text-muted">-</span>') + (extra || '') + '</td></tr>';
+  const wa = t => t ? ' <a class="btn btn-sm btn-outline-success py-0 ms-1" target="_blank" href="https://wa.me/' + esc(t.replace(/^0/, '62').replace(/^\+/, '')) + '"><i class="bi bi-whatsapp"></i></a>' +
+    ' <a class="btn btn-sm btn-outline-primary py-0" href="tel:' + esc(t) + '"><i class="bi bi-telephone"></i></a>' : '';
+  modal({
+    title: 'Biodata: ' + p.nama,
+    body: '<table class="table table-sm mb-0">' +
+      row('Username / NIS', p.username) + (p.nisn ? row('NISN', p.nisn) : '') + (p.nip ? row('NIP', p.nip) : '') +
+      row('Kelas', p.kelas) + row('Jenis kelamin', JK_LABEL[p.jenis_kelamin] || '') +
+      row('Tempat, tanggal lahir', [p.tempat_lahir, p.tanggal_lahir ? fmtDT(p.tanggal_lahir, false) : ''].filter(Boolean).join(', ')) +
+      row('Umur', p.umur) + (p.alamat !== null ? row('Alamat', p.alamat) : '') +
+      row('No. HP', p.no_telepon, wa(p.no_telepon)) +
+      (p.role === 'siswa' ? row('Orang tua / wali', p.nama_wali) + row('No. HP orang tua', p.telepon_wali, wa(p.telepon_wali)) : '') +
+      '</table>'
+  });
+}
+
+/* ---------------- PROFIL SAYA ---------------- */
+VIEWS.profil = {
+  title: 'Profil Saya',
+  render: async function (el) {
+    el.innerHTML = pageHead('Profil Saya', 'Periksa biodata Anda. Data yang salah selain kontak dapat diperbaiki oleh admin.') + spinner();
+    const p = await api('getProfil', {}, { silent: true });
+    const ro = (k, v) => '<div class="col-6 col-md-4 mb-2"><div class="small text-muted">' + k + '</div><div class="fw-semibold">' + (v ? esc(v) : '-') + '</div></div>';
+    const siswa = p.role === 'siswa';
+    el.innerHTML = pageHead('Profil Saya', 'Periksa biodata Anda. Data yang salah selain kontak dapat diperbaiki oleh admin.') +
+      '<div class="card mb-3"><div class="card-body"><div class="row">' +
+      ro('Nama', p.nama) + ro(siswa ? 'NIS / Username' : 'Username', p.username) + (siswa ? ro('Kelas', p.kelas) : ro('NIP', p.nip)) +
+      ro('Jenis kelamin', JK_LABEL[p.jenis_kelamin]) + ro('Tempat, tgl lahir', [p.tempat_lahir, p.tanggal_lahir ? fmtDT(p.tanggal_lahir, false) : ''].filter(Boolean).join(', ')) +
+      ro('Umur', p.umur) + (siswa && p.nisn ? ro('NISN', p.nisn) : '') +
+      '</div></div></div>' +
+      '<div class="card"><div class="card-header"><i class="bi bi-telephone"></i> Kontak (bisa Anda ubah sendiri)</div><div class="card-body">' +
+      '<form id="pfForm" class="row g-2">' +
+      fieldHtml({ name: 'no_telepon', label: 'No. HP', type: 'tel', col: 'col-md-6', placeholder: '08…' }, p.no_telepon) +
+      fieldHtml({ name: 'alamat', label: 'Alamat', type: 'textarea', rows: 2 }, p.alamat) +
+      (siswa ? fieldHtml({ name: 'nama_wali', label: 'Nama orang tua / wali', col: 'col-md-6' }, p.nama_wali) +
+        fieldHtml({ name: 'telepon_wali', label: 'No. HP orang tua / wali', type: 'tel', col: 'col-md-6', placeholder: '08…' }, p.telepon_wali) : '') +
+      '<div class="col-12 text-end"><button class="btn btn-primary"><i class="bi bi-save"></i> Simpan</button></div></form></div></div>';
+    $('#pfForm', el).onsubmit = async e => {
+      e.preventDefault();
+      await api('saveProfil', readForm(e.target));
+      toast('Kontak disimpan', 'success');
+    };
+  }
+};
+
+/* =============================================================
+ *  IMPORT DARI FILE DAPODIK (Excel .xlsx/.xls atau .csv)
+ * ============================================================= */
+const DAPODIK_KOLOM = {
+  nama: ['namalengkap', 'nama', 'namasiswa', 'namapesertadidik', 'namapd'],
+  nisn: ['nisn'],
+  nis: ['nis', 'nipd', 'nisnipd'],
+  tempat_lahir: ['tempatlahir'],
+  tanggal_lahir: ['tanggallahir', 'tgllahir', 'tgllhr'],
+  kelas: ['tingkatrombel', 'rombel', 'rombelsaatini', 'namarombel', 'kelas', 'tingkatkelas'],
+  status: ['status', 'statussiswa'],
+  jenis_kelamin: ['jeniskelamin', 'jk', 'lp', 'kelamin'],
+  alamat: ['alamat', 'alamatjalan', 'alamatlengkap'],
+  no_telepon: ['notelepon', 'telepon', 'nohp', 'hp', 'nomortelepon', 'notelp', 'nohpsiswa', 'nomorhp'],
+  nama_wali: ['namawali', 'namaayah', 'namaibu', 'namaortu', 'namaorangtua'],
+  telepon_wali: ['nohportu', 'hportu', 'teleponwali', 'nohpwali', 'hpwali', 'nohporangtua', 'teleponortu']
+};
+const normKolom = h => String(h == null ? '' : h).toLowerCase().replace(/[^a-z0-9]/g, '');
+const bersihSel = v => (v == null ? '' : String(v)).replace(/^'+/, '').replace(/\s+/g, ' ').trim();
+
+/** Nama kelas dari kolom rombel: "Kelas 8 - kelas VIII" → "VIII" */
+function kelasDariRombel(v) {
+  let s = bersihSel(v);
+  if (!s) return '';
+  if (s.indexOf('-') >= 0) s = s.split('-').pop();
+  return s.replace(/^\s*kelas\s+/i, '').trim();
+}
+function tanggalSel(v) {
+  if (v instanceof Date && !isNaN(v)) {
+    return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+  }
+  if (typeof v === 'number' && v > 1000 && v < 80000) { // nomor seri tanggal Excel
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+  }
+  return bersihSel(v);
+}
+
+/** aoa (array baris) → data siap impor. Baris judul dicari otomatis (boleh ada judul laporan di atasnya). */
+function parseDapodik(aoa) {
+  let hi = -1, map = {};
+  for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+    const m = {};
+    (aoa[i] || []).forEach((h, j) => {
+      const n = normKolom(h);
+      Object.keys(DAPODIK_KOLOM).forEach(k => {
+        const idx = DAPODIK_KOLOM[k].indexOf(n);
+        if (idx >= 0 && (m[k] === undefined || idx < m[k].p)) m[k] = { j: j, p: idx };
+      });
+    });
+    if (m.nama && (m.nisn || m.nis)) { hi = i; Object.keys(m).forEach(k => map[k] = m[k].j); break; }
+  }
+  if (hi < 0) throw new Error('Kolom "Nama" dan "NISN"/"NIS" tidak ditemukan. Pastikan file berisi baris judul kolom seperti hasil ekspor Dapodik.');
+  const rows = [], warn = [];
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i] || [];
+    const g = k => map[k] === undefined ? '' : r[map[k]];
+    const nama = bersihSel(g('nama'));
+    let nisn = bersihSel(g('nisn')), nis = bersihSel(g('nis'));
+    if (!nama && !nisn && !nis) continue;
+    if (/^\d+(\.0+)?$/.test(nisn)) { nisn = nisn.replace(/\.0+$/, ''); if (nisn.length < 10) nisn = nisn.padStart(10, '0'); } // NISN 10 digit
+    const username = nisn || nis;
+    const jk0 = bersihSel(g('jenis_kelamin')).toUpperCase().charAt(0);
+    const st = bersihSel(g('status')).toLowerCase();
+    if (!username || !nama) { warn.push('Baris ' + (i + 1) + ': nama/NISN kosong (dilewati)'); continue; }
+    rows.push({
+      username: username, nama: nama, role: 'siswa', kelas: kelasDariRombel(g('kelas')), kelas_asli: bersihSel(g('kelas')),
+      nisn: nisn, jenis_kelamin: jk0 === 'L' || jk0 === 'P' ? jk0 : '',
+      tempat_lahir: bersihSel(g('tempat_lahir')), tanggal_lahir: tanggalSel(g('tanggal_lahir')),
+      status: !st ? '' : /^aktif/.test(st) ? 'AKTIF' : 'NONAKTIF',   // kosong = status lama dipertahankan
+      alamat: bersihSel(g('alamat')), no_telepon: bersihSel(g('no_telepon')),
+      nama_wali: bersihSel(g('nama_wali')), telepon_wali: bersihSel(g('telepon_wali'))
+    });
+  }
+  // hanya kirim kolom biodata yang memang ada di file (agar data lama tidak terhapus)
+  const ada = Object.keys(map);
+  rows.forEach(r => ['tempat_lahir', 'tanggal_lahir', 'alamat', 'no_telepon', 'nama_wali', 'telepon_wali', 'jenis_kelamin'].forEach(k => { if (ada.indexOf(k) < 0) delete r[k]; }));
+  return { rows: rows, warn: warn, kolom: ada, abaikan: (aoa[hi] || []).filter(h => normKolom(h) === 'nik').length ? ['NIK'] : [] };
+}
+
+function parseCsv(text) {
+  text = text.replace(/^﻿/, '');
+  const first = text.split(/\r?\n/)[0] || '';
+  const sep = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ';' : ((first.match(/\t/g) || []).length ? '\t' : ',');
+  const out = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === sep) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); out.push(row); row = []; cur = ''; }
+    else cur += c;
+  }
+  if (cur || row.length) { row.push(cur); out.push(row); }
+  return out;
+}
+
+async function bacaFileTabel(file) {
+  if (/\.(csv|txt)$/i.test(file.name)) return parseCsv(await file.text());
+  await loadScript(XLSX_LIB);
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+}
+
+/** Dialog import Dapodik: pilih file → pratinjau + pemetaan kelas → impor (diperbarui bila sudah ada) */
+function importDapodikDlg(onDone) {
+  const el = modal({
+    title: 'Import Siswa dari File Dapodik', size: 'xl',
+    body: '<div class="alert alert-info small mb-3"><b>Langkah:</b> ekspor daftar peserta didik dari Dapodik (atau siapkan file Excel dengan judul kolom seperti ' +
+      '<i>Nama Lengkap, NISN, Tempat Lahir, Tanggal Lahir, Tingkat - Rombel, Status, Jenis Kelamin, Alamat, No Telepon</i>), lalu pilih file di bawah. ' +
+      'Siswa yang NISN-nya sudah terdaftar akan <b>diperbarui</b>, bukan dibuat dobel. Kolom <b>NIK tidak disimpan</b>.</div>' +
+      '<input type="file" class="form-control mb-3" id="dpFile" accept=".xlsx,.xls,.csv">' +
+      '<div id="dpPrev"></div>',
+    footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button><button class="btn btn-primary" id="dpGo" disabled><i class="bi bi-upload"></i> Import</button>'
+  });
+  let data = null;
+  $('#dpFile', el).onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    $('#dpPrev', el).innerHTML = spinner();
+    $('#dpGo', el).disabled = true;
+    try {
+      data = parseDapodik(await bacaFileTabel(f));
+      const M = await getMaster(true);
+      const kelasAda = {}; M.kelas.forEach(k => kelasAda[k.nama_kelas.toLowerCase()] = k.nama_kelas);
+      const kelasFile = Array.from(new Set(data.rows.map(r => r.kelas))).filter(Boolean).sort();
+      const nL = data.rows.filter(r => r.jenis_kelamin === 'L').length, nP = data.rows.filter(r => r.jenis_kelamin === 'P').length;
+      $('#dpPrev', el).innerHTML =
+        '<div class="d-flex flex-wrap gap-3 mb-2 small"><span><b>' + data.rows.length + '</b> siswa terbaca</span><span>L: <b>' + nL + '</b> · P: <b>' + nP + '</b></span>' +
+        (data.abaikan.length ? '<span class="text-muted">Kolom diabaikan: ' + data.abaikan.join(', ') + '</span>' : '') + '</div>' +
+        (kelasFile.length ? '<div class="mb-3"><div class="small fw-semibold mb-1">Pemetaan kelas (dari kolom Rombel)</div><div class="row g-2">' +
+          kelasFile.map(k => '<div class="col-md-4"><div class="input-group input-group-sm"><span class="input-group-text">' + esc(k) + ' →</span>' +
+            '<select class="form-select" data-kelas="' + esc(k) + '">' +
+            M.kelas.map(x => '<option value="' + esc(x.nama_kelas) + '"' + (x.nama_kelas.toLowerCase() === k.toLowerCase() ? ' selected' : '') + '>' + esc(x.nama_kelas) + '</option>').join('') +
+            '<option value="' + esc(k) + '"' + (kelasAda[k.toLowerCase()] ? '' : ' selected') + '>➕ Buat kelas baru "' + esc(k) + '"</option></select></div></div>').join('') +
+          '</div></div>' : '<div class="alert alert-warning small">Kolom kelas/rombel tidak ditemukan: siswa baru wajib punya kelas.</div>') +
+        '<div class="form-check mb-1"><input class="form-check-input" type="checkbox" id="dpUpd" checked><label class="form-check-label small" for="dpUpd">Perbarui nama, kelas, status & biodata siswa yang sudah terdaftar</label></div>' +
+        '<div class="small text-muted mb-2"><i class="bi bi-shield-check"></i> Aman: sel yang kosong di file tidak menghapus data lama · siswa yang tidak ada di file tidak diubah/dihapus · password, data wajah, absensi & nilai tidak tersentuh.</div>' +
+        '<div class="table-responsive" style="max-height:260px"><table class="table table-sm table-bordered small mb-1"><thead class="table-light"><tr><th>NISN</th><th>Nama</th><th>L/P</th><th>Kelas</th><th>Tempat, Tgl Lahir</th><th>Status</th><th>No. HP</th></tr></thead><tbody>' +
+        data.rows.slice(0, 50).map(r => '<tr><td><code>' + esc(r.username) + '</code></td><td>' + esc(r.nama) + '</td><td>' + esc(r.jenis_kelamin || '-') + '</td><td>' + esc(r.kelas || '-') +
+          '</td><td>' + esc([r.tempat_lahir, r.tanggal_lahir].filter(Boolean).join(', ')) + '</td><td>' + esc(r.status || '(tetap)') + '</td><td>' + esc(r.no_telepon || '') + '</td></tr>').join('') +
+        '</tbody></table></div>' + (data.rows.length > 50 ? '<div class="small text-muted">…dan ' + (data.rows.length - 50) + ' siswa lainnya</div>' : '') +
+        (data.warn.length ? '<div class="alert alert-warning small py-2 mt-2">' + data.warn.map(esc).join('<br>') + '</div>' : '') +
+        '<div id="dpRes" class="mt-2"></div>';
+      $('#dpGo', el).disabled = !data.rows.length;
+    } catch (err) {
+      $('#dpPrev', el).innerHTML = '<div class="alert alert-danger small">' + esc(err.message) + '</div>';
+    }
+  };
+  $('#dpGo', el).onclick = async () => {
+    if (!data) return;
+    const peta = {}; $$('[data-kelas]', el).forEach(s => peta[s.dataset.kelas] = s.value);
+    const rows = data.rows.map(r => { const o = Object.assign({}, r, { kelas: peta[r.kelas] || r.kelas }); delete o.kelas_asli; return o; });
+    const btn = $('#dpGo', el); btn.disabled = true;
+    const tot = { added: 0, updated: 0, kelas_baru: 0, errors: [] };
+    try {
+      for (let i = 0; i < rows.length; i += 300) { // dikirim bertahap agar aman untuk file besar
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + Math.min(i + 300, rows.length) + '/' + rows.length;
+        const r = await api('importUsers', { perbarui: $('#dpUpd', el).checked, rows: rows.slice(i, i + 300) });
+        tot.added += r.added; tot.updated += r.updated; tot.kelas_baru += r.kelas_baru;
+        tot.errors = tot.errors.concat(r.errors.map(e => e.replace(/^Baris (\d+)/, (m, n) => 'Baris ' + (+n + i))));
+      }
+      $('#dpRes', el).innerHTML = '<div class="alert alert-success small py-2">Selesai: <b>' + tot.added + '</b> siswa baru, <b>' + tot.updated + '</b> diperbarui' +
+        (tot.kelas_baru ? ', ' + tot.kelas_baru + ' kelas baru' : '') + '. Siswa baru login dengan password = NISN dan wajib menggantinya.</div>' +
+        (tot.errors.length ? '<div class="alert alert-warning small py-2" style="max-height:160px;overflow:auto">' + tot.errors.map(esc).join('<br>') + '</div>' : '');
+      S.master = null;
+      if (onDone) onDone();
+    } finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-upload"></i> Import'; }
+  };
+}
 </script>
 
 <script>
@@ -1296,7 +1560,7 @@ VIEWS.detailSesi = {
           '</div><div class="fs-4 fw-bold text-' + (STATUS_COLOR[k] === 'light' ? 'secondary' : STATUS_COLOR[k]) + '">' + c[k] + '</div></div></div></div>').join('') + '</div>' +
         '<div class="card"><div class="card-body">' + tableHtml([
           { h: '#', f: (x, i) => i + 1 },
-          { h: 'Nama', f: x => '<b>' + esc(x.nama) + '</b><div class="small text-muted">' + esc(x.username) + '</div>' },
+          { h: 'Nama', f: x => '<a href="#" class="fw-bold text-decoration-none" data-act="bio" data-id="' + esc(x.user_id) + '">' + esc(x.nama) + '</a><div class="small text-muted">' + esc(x.username) + '</div>' },
           { h: 'Status', f: x => badge(x.status) + (x.keterangan ? '<div class="small text-muted">' + esc(x.keterangan) + '</div>' : '') },
           { h: 'Waktu', f: x => x.waktu ? esc(x.waktu.substring(11, 16)) : '-' },
           { h: 'Metode', f: x => esc(x.metode || '-') },
@@ -1307,6 +1571,7 @@ VIEWS.detailSesi = {
       back: () => navigate('absensiGuru'),
       qr: () => navigate('qrDisplay', { id: p.id }),
       reload: load,
+      bio: uid => showBiodata(uid),
       csv: () => downloadCsv('Absensi_' + d.sesi.kelas + '_' + d.sesi.tanggal, ['No', 'NIS', 'Nama', 'Status', 'Waktu', 'Metode', 'Keterangan'],
         d.siswa.map((x, i) => [i + 1, x.username, x.nama, x.status, x.waktu, x.metode, x.keterangan])),
       set: uid => {
@@ -2427,7 +2692,7 @@ function renderReport(box, r, tab) {
     (r.rows.length ? '<div class="table-responsive"><table class="table table-bordered table-sm align-middle ' + (isMatrix ? 'matrix' : '') + '"><thead class="table-light"><tr>' +
       r.headers.map(h => '<th>' + esc(h).replace(/\n/g, '<br><span class="fw-normal">') + (String(h).indexOf('\n') >= 0 ? '</span>' : '') + '</th>').join('') + '</tr></thead><tbody>' +
       r.rows.map(row => '<tr>' + row.map((c, i) => {
-        const cls = isMatrix && i >= 3 && i < row.length - 6 && 'HTISA'.indexOf(c) >= 0 && c ? 'st-' + c : '';
+        const cls = isMatrix && i >= (r.cell_start || 3) && i < row.length - 6 && 'HTISA'.indexOf(c) >= 0 && c ? 'st-' + c : '';
         const isPred = tab === 'terpadu' && i === row.length - 1;
         return '<td class="' + cls + '">' + (isPred && c !== '-' ? badge(c, { A: 'success', B: 'primary', C: 'info', D: 'warning', E: 'danger' }[c]) : esc(c)) + '</td>';
       }).join('') + '</tr>').join('') + '</tbody></table></div>' : emptyState('Tidak ada data untuk filter ini')) +
