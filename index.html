@@ -56,6 +56,14 @@
   .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#38bdf8 100%); }
   .login-card { width:100%; max-width:400px; }
   .login-logo { width:64px; height:64px; border-radius:18px; background:#eff6ff; color:var(--brand2); display:flex; align-items:center; justify-content:center; font-size:2rem; margin:0 auto 12px; }
+  .login-logo:has(img) { width:96px; height:96px; background:none; border-radius:0; }
+  .logo-slot img { width:100%; height:100%; object-fit:contain; display:block; }
+  .nav-logo { width:30px; height:30px; flex:0 0 30px; display:inline-flex; align-items:center; justify-content:center; }
+  .nav-logo:has(img) { background:#fff; border-radius:50%; padding:2px; }
+  .print-kop { display:none; }
+  .print-kop img { width:20mm; height:20mm; object-fit:contain; }
+  .k-head .logo-slot { width:8.5mm; height:8.5mm; flex:0 0 8.5mm; display:flex; align-items:center; justify-content:center; font-size:5mm; }
+  .k-head .logo-slot:has(img) { background:#fff; border-radius:50%; padding:0.4mm; }
 
   /* QR */
   .qr-box { width:300px; max-width:100%; padding:12px; background:#fff; border-radius:16px; border:1px solid #e2e8f0; }
@@ -148,7 +156,10 @@
     body.cetak-kartu > *:not(#printArea) { display:none !important; }
     body.cetak-kartu #printArea { display:block !important; }
     body.cetak-kartu { background:#fff !important; padding:0 !important; }
-    .no-print, .app-chrome, .bottom-nav, .sidebar, nav { display:none !important; }
+    .no-print, .app-chrome, .bottom-nav, .sidebar, nav, .toast-container, .page-head, #lapF, .nav-tabs { display:none !important; }
+    .print-kop { display:flex !important; align-items:center; gap:4mm; border-bottom:0.6mm double #000; padding-bottom:2mm; margin-bottom:4mm; }
+    .print-kop .pk-sek { font-size:15pt; font-weight:bold; text-transform:uppercase; }
+    .print-kop .pk-sub { font-size:10pt; }
     body { background:#fff; padding:0 !important; }
     main { padding:0 !important; }
     .card { box-shadow:none; }
@@ -218,6 +229,31 @@ const store = {
   set(k, v) { try { localStorage.setItem('siakad_' + k, JSON.stringify(v)); } catch (e) { } },
   del(k) { try { localStorage.removeItem('siakad_' + k); } catch (e) { } }
 };
+/* ---------------- LOGO SEKOLAH ----------------
+ * Logo disimpan di database; klien hanya mengunduhnya ulang bila versinya berubah. */
+const LOGO = {
+  src: (store.get('logo') || {}).src || '',
+  set(src) {
+    this.src = src || '';
+    document.querySelectorAll('.logo-slot').forEach(e => { e.innerHTML = this.inner(e.dataset.icon); });
+    ['icon', 'apple-touch-icon'].forEach(rel => {
+      let l = document.querySelector('link[rel="' + rel + '"]');
+      if (!this.src) { if (l) l.remove(); return; }
+      if (!l) { l = document.createElement('link'); l.rel = rel; document.head.appendChild(l); }
+      l.href = this.src;
+    });
+  },
+  inner(icon) { return this.src ? '<img src="' + this.src + '" alt="Logo">' : '<i class="bi bi-' + (icon || 'mortarboard-fill') + '"></i>'; },
+  html(cls, icon) { return '<span class="logo-slot ' + (cls || '') + '" data-icon="' + (icon || 'mortarboard-fill') + '">' + this.inner(icon) + '</span>'; },
+  async sync(ver) {
+    if (!ver) { store.del('logo'); return this.set(''); }
+    const c = store.get('logo');
+    if (c && c.ver === ver) { if (c.src !== this.src) this.set(c.src); return; }
+    try { const r = await api('logo', {}, { silent: true, quiet: true }); store.set('logo', { ver: r.ver, src: r.logo }); this.set(r.logo); } catch (e) { }
+  }
+};
+function judulHalaman(nama) { document.title = (nama ? nama + ' – ' : '') + 'SIAKAD Mini'; }
+
 const BLN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 function fmtDT(s, withTime) {
   if (!s) return '-';
@@ -524,7 +560,7 @@ function renderShell() {
   $('#app').innerHTML =
     '<nav class="navbar navbar-dark bg-brand sticky-top app-chrome" style="z-index:1035"><div class="container-fluid">' +
     (!isSiswa ? '<button class="btn btn-link text-white d-lg-none p-1 me-1" data-bs-toggle="offcanvas" data-bs-target="#sidebar"><i class="bi bi-list fs-3"></i></button>' : '') +
-    '<span class="navbar-brand me-auto text-truncate"><i class="bi bi-mortarboard-fill"></i> ' + esc(S.settings.nama_sekolah || 'SIAKAD Mini') + '</span>' +
+    '<span class="navbar-brand me-auto text-truncate d-flex align-items-center gap-2">' + LOGO.html('nav-logo') + '<span class="text-truncate">' + esc(S.settings.nama_sekolah || 'SIAKAD Mini') + '</span></span>' +
     '<div class="dropdown"><button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-person-circle"></i> <span class="d-none d-sm-inline">' + esc(u.nama) + '</span></button>' +
     '<ul class="dropdown-menu dropdown-menu-end"><li><h6 class="dropdown-header">' + esc(u.nama) + '<br><small>' + esc(ROLE_LABEL[u.role]) + (u.kelas ? ' · ' + esc(u.kelas) : '') + '</small></h6></li>' +
     '<li><a class="dropdown-item" href="#" data-nav="profil"><i class="bi bi-person-vcard"></i> Profil Saya</a></li>' +
@@ -553,6 +589,7 @@ function renderShell() {
 
 function navigate(view, params) {
   leaveView();
+  S.nav = (S.nav || 0) + 1;
   S.view = view;
   S.params = params || {};
   $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === view));
@@ -563,7 +600,7 @@ function navigate(view, params) {
   const el = document.createElement('div');
   c.appendChild(el);
   if (!v) { el.innerHTML = emptyState('Halaman tidak ditemukan', 'question-circle'); return; }
-  document.title = v.title + ' · SIAKAD Mini';
+  document.title = v.title + ' · ' + ((S.settings && S.settings.nama_sekolah) || 'SIAKAD Mini');
   window.scrollTo(0, 0);
   try {
     const p = v.render(el, S.params);
@@ -586,7 +623,7 @@ function renderLogin(msg) {
   document.body.classList.remove('has-bottom-nav');
   $('#app').innerHTML =
     '<div class="login-wrap"><div class="card login-card"><div class="card-body p-4">' +
-    '<div class="login-logo"><i class="bi bi-mortarboard-fill"></i></div>' +
+    LOGO.html('login-logo') +
     '<h5 class="text-center fw-bold mb-0" id="lgSchool">SIAKAD Mini</h5>' +
     '<div class="text-center text-muted small mb-4">Absensi & Ujian Online</div>' +
     (msg ? '<div class="alert alert-warning small py-2">' + esc(msg) + '</div>' : '') +
@@ -618,6 +655,7 @@ function renderLogin(msg) {
   };
   api('publicInfo', {}, { silent: true, quiet: true }).then(i => {
     const n = $('#lgSchool'); if (n) n.textContent = i.nama_sekolah;
+    judulHalaman(i.nama_sekolah); LOGO.sync(i.logo_ver);
     const s = $('#lgSem'); if (s) s.textContent = 'Tahun Ajaran ' + i.tahun_ajaran + ' · Semester ' + i.semester;
   }).catch(() => { });
 }
@@ -673,6 +711,7 @@ function forcePassword() {
 }
 
 function startApp() {
+  judulHalaman(S.settings && S.settings.nama_sekolah); LOGO.sync(S.settings && S.settings.logo_ver);
   renderShell();
   getMaster().catch(() => { });
   navigate(HOME[S.user.role]);
@@ -688,12 +727,26 @@ async function boot() {
       if (S.user.wajib_ganti_pw) return forcePassword();
       return startApp();
     } catch (e) {
+      if (e.network) return offlineScreen(e.message);
       S.token = null;
       store.del('auth');
-      if (!e.network) return renderLogin(e.code === 'AUTH' ? e.message : '');
+      return renderLogin(e.code === 'AUTH' ? e.message : '');
     }
   }
   renderLogin();
+}
+
+/** Server tidak terjangkau saat aplikasi dibuka: sesi login tetap disimpan, cukup coba lagi */
+function offlineScreen(msg) {
+  document.body.classList.remove('has-bottom-nav');
+  $('#app').innerHTML = '<div class="login-wrap"><div class="card login-card"><div class="card-body p-4 text-center">' +
+    '<div class="login-logo"><i class="bi bi-wifi-off"></i></div><h5 class="fw-bold">Tidak dapat terhubung</h5>' +
+    '<p class="small text-muted">Periksa koneksi internet lalu coba lagi. Anda tidak perlu login ulang.</p>' +
+    '<div class="small text-danger mb-3">' + esc(msg || '') + '</div>' +
+    '<button class="btn btn-primary w-100" id="olRetry"><i class="bi bi-arrow-clockwise"></i> Coba lagi</button>' +
+    '<button class="btn btn-link w-100 text-muted mt-1" id="olOut">Masuk dengan akun lain</button></div></div></div>';
+  $('#olRetry').onclick = () => boot();
+  $('#olOut').onclick = () => { S.token = null; store.del('auth'); renderLogin(); };
 }
 </script>
 
@@ -951,6 +1004,11 @@ VIEWS.pengaturan = {
         { name: 'bobot_uts', label: 'Bobot UTS (%)', type: 'number', min: 0, col: 'col-6 col-md-2' },
         { name: 'bobot_uas', label: 'Bobot UAS (%)', type: 'number', min: 0, col: 'col-6 col-md-2' }]) +
       '<div class="text-end"><button class="btn btn-primary px-4"><i class="bi bi-save"></i> Simpan Pengaturan</button></div></form>' +
+      '<div class="card mt-4"><div class="card-header"><i class="bi bi-image"></i> Logo Sekolah</div><div class="card-body d-flex flex-wrap align-items-center gap-3">' +
+      '<div id="logoPrev" class="border rounded d-flex align-items-center justify-content-center bg-light" style="width:110px;height:110px"></div>' +
+      '<div><p class="small text-muted mb-2">Tampil di halaman login, menu atas, ikon tab browser, kartu QR siswa, laporan Excel dan laporan PDF/cetak.<br>Gunakan PNG berlatar transparan agar paling rapi; gambar otomatis diperkecil.</p>' +
+      '<div class="d-flex flex-wrap gap-2"><label class="btn btn-primary btn-sm mb-0"><i class="bi bi-upload"></i> Pilih Gambar…<input type="file" accept="image/png,image/jpeg,image/webp" hidden id="logoFile"></label>' +
+      '<button type="button" class="btn btn-outline-danger btn-sm" id="logoDel"><i class="bi bi-trash"></i> Hapus logo</button></div></div></div></div>' +
       '<div class="card mt-4 border-warning"><div class="card-header"><i class="bi bi-safe"></i> Cadangan Data (Backup)</div><div class="card-body">' +
       '<p class="small text-muted mb-3">Paket gratis Supabase tidak menyediakan backup otomatis. Unduh cadangan secara rutin (mis. tiap Jumat) dan simpan di Google Drive/flashdisk. ' +
       'File cadangan berisi seluruh data termasuk data wajah — simpan di tempat aman.</p>' +
@@ -958,6 +1016,18 @@ VIEWS.pengaturan = {
       '<label class="btn btn-outline-danger mb-0"><i class="bi bi-upload"></i> Pulihkan dari File…<input type="file" accept=".json,application/json" hidden id="fileRestore"></label></div>' +
       '<div class="form-text mt-2">Pulihkan juga dipakai untuk memindahkan data dari versi Google Sheets (lihat README bagian Migrasi).</div></div></div>';
     const form = $('#setForm', el);
+    const prevLogo = () => { $('#logoPrev', el).innerHTML = LOGO.src ? '<img src="' + LOGO.src + '" style="max-width:96px;max-height:96px">' : '<span class="small text-muted">Belum ada</span>'; $('#logoDel', el).disabled = !LOGO.src; };
+    prevLogo();
+    const simpanLogo = async src => {
+      const r = await api('saveLogo', { logo: src });
+      S.settings.logo_ver = r.ver; store.set('logo', { ver: r.ver, src }); LOGO.set(src); prevLogo();
+      toast(src ? 'Logo disimpan' : 'Logo dihapus', 'success');
+    };
+    $('#logoFile', el).onchange = async e => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      try { await simpanLogo(await kecilkanLogo(f)); } catch (err) { toast(err.message || 'Gambar tidak dapat dibaca', 'danger'); }
+    };
+    $('#logoDel', el).onclick = async () => { if (await confirmDlg('Hapus logo sekolah?', 'Hapus', 'danger')) await simpanLogo(''); };
     $('#btnLoc', el).onclick = async () => {
       const loc = await getLocation();
       if (!loc.lat) return toast('Lokasi tidak terdeteksi. Izinkan akses lokasi.', 'warning');
@@ -1014,6 +1084,28 @@ const AKSI_LABEL = {
   deleteUjian: 'Hapus ujian', setStatusUjian: 'Ubah status ujian', unlockSesiUjian: 'Buka kunci ujian siswa', resetSesiUjian: 'Reset ujian siswa',
   addTimeUjian: 'Tambah waktu ujian', nilaiEsai: 'Nilai esai'
 };
+/** Memperkecil gambar logo (maks 256 px, PNG; JPEG bila hasilnya terlalu besar) */
+function kecilkanLogo(file) {
+  return new Promise((ok, no) => {
+    const fr = new FileReader();
+    fr.onerror = () => no(new Error('File tidak dapat dibaca'));
+    fr.onload = () => {
+      const im = new Image();
+      im.onerror = () => no(new Error('File bukan gambar yang valid'));
+      im.onload = () => {
+        const k = Math.min(1, 256 / Math.max(im.width, im.height));
+        const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+        c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+        let d = c.toDataURL('image/png');
+        if (d.length > 300000) d = c.toDataURL('image/jpeg', 0.9);
+        ok(d);
+      };
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
 VIEWS.auditLog = {
   title: 'Log Aktivitas',
   render: async function (el) {
@@ -1344,14 +1436,16 @@ const Face = {
   preload() { if (!this.ready && !this._p) setTimeout(() => this.load().catch(() => { }), 800); },
   async start(video, facing) {
     this.stop();
+    const nav = S.nav;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('Browser tidak mendukung akses kamera. Gunakan Chrome/Safari versi terbaru.');
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing || 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
     } catch (e) { throw new Error(camErr(e)); }
+    if (S.nav !== nav) { this.stop(); throw new Error('dibatalkan'); } // halaman sudah ditinggalkan
     video.setAttribute('playsinline', ''); video.muted = true;
     video.srcObject = this.stream;
-    await video.play();
     onLeave(() => this.stop());
+    await video.play();
   },
   stop() { if (this.stream) { this.stream.getTracks().forEach(t => t.stop()); this.stream = null; } },
   opts() { return new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }); },
@@ -1420,8 +1514,10 @@ const QRS = {
   // Default cermin: aktif untuk kamera depan & webcam laptop (yang memang menghadap pengguna)
   cermin() { return typeof this.pref.mirror === 'boolean' ? this.pref.mirror : (this.pref.deviceId ? !this.sentuh() : (this.facing() === 'user' || !this.sentuh())); },
   async start(elId, onCode) {
+    const nav = S.nav;
     await loadScript(QR_LIB);
     await this.stop();
+    if (S.nav !== nav || !document.getElementById(elId)) return; // halaman sudah ditinggalkan
     this.elId = elId; this.onCode = onCode;
     // Hanya format QR + pakai BarcodeDetector bawaan browser bila tersedia (jauh lebih cepat)
     this.inst = new Html5Qrcode(elId, {
@@ -1434,12 +1530,19 @@ const QRS = {
     const cfg = { fps: 15, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } };
     const cb = txt => { if (this.busy) return; this.busy = true; onCode(txt); };
     const kam = this.pref.deviceId || { facingMode: this.facing() };
-    try { await this.inst.start(kam, cfg, cb, () => { }); }
+    const inst = this.inst;
+    try { await inst.start(kam, cfg, cb, () => { }); }
     catch (e) {
+      if (S.nav !== nav) return; // halaman sudah ditinggalkan: abaikan galat kamera
       if (this.pref.deviceId) { // kamera tersimpan sudah tidak ada → kembali ke mode depan/belakang
         delete this.pref.deviceId; this.simpan();
-        try { await this.inst.start({ facingMode: this.facing() }, cfg, cb, () => { }); } catch (e2) { throw new Error(camErr(e2)); }
+        try { await inst.start({ facingMode: this.facing() }, cfg, cb, () => { }); } catch (e2) { throw new Error(camErr(e2)); }
       } else throw new Error(camErr(e));
+    }
+    if (S.nav !== nav || this.inst !== inst) { // halaman sudah ditinggalkan saat kamera sedang dinyalakan
+      try { if (inst.isScanning) await inst.stop(); inst.clear(); } catch (e) { }
+      if (this.inst === inst) this.inst = null;
+      return;
     }
     this.terapkanCermin(); this.panel();
   },
@@ -1898,7 +2001,7 @@ function cetakKartu(data) {
   if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
   area.innerHTML = '<div class="kartu-sheet">' + data.kartu.map((c, i) =>
     '<div class="kartu">' +
-    '<div class="k-head"><i class="bi bi-mortarboard-fill"></i><div class="k-head-t"><div class="k-sek">' + esc(data.sekolah || '') + '</div><div class="k-jud">KARTU ABSENSI SISWA</div></div></div>' +
+    '<div class="k-head">' + LOGO.html() + '<div class="k-head-t"><div class="k-sek">' + esc(data.sekolah || '') + '</div><div class="k-jud">KARTU ABSENSI SISWA</div></div></div>' +
     '<div class="k-body"><div class="k-info"><div class="k-nama">' + esc(c.nama) + '</div>' +
     '<table><tr><td>NISN</td><td>: ' + esc(c.nisn) + '</td></tr><tr><td>Kelas</td><td>: ' + esc(c.kelas) + '</td></tr>' +
     (c.jk ? '<tr><td>L/P</td><td>: ' + esc(c.jk) + '</td></tr>' : '') + '</table></div>' +
@@ -1985,7 +2088,7 @@ VIEWS.scanKartu = {
       '<div class="card"><div class="card-header small">Baru dipindai</div><div class="card-body p-2" id="skLog"><div class="small text-muted p-2">Belum ada</div></div></div>' +
       '</div></div>';
     const input = $('#skInput', el);
-    let lastCode = '', lastAt = 0, busy = false, camOn = false;
+    let lastCode = '', lastAt = 0, busy = false, camOn = false; const antre = [];
     const presisi = window.matchMedia && matchMedia('(pointer:fine)').matches; // laptop/PC: kotak input selalu fokus untuk scanner USB
     if (presisi) input.focus();
     const flash = (jenis, judul, sub) => {
@@ -2000,9 +2103,11 @@ VIEWS.scanKartu = {
     };
     async function proses(kode) {
       kode = String(kode || '').trim();
-      if (!kode || busy) return;
+      if (!kode) return;
       if (kode === lastCode && Date.now() - lastAt < 4000) return; // kartu yang sama tertahan di depan kamera
-      lastCode = kode; lastAt = Date.now(); busy = true;
+      lastCode = kode; lastAt = Date.now();
+      if (busy) { if (antre.indexOf(kode) < 0) antre.push(kode); return; } // dipindai beruntun: proses bergiliran
+      busy = true;
       try {
         const r = await api('scanKartu', { sesi_id: p.id, kode: kode }, { silent: true, quiet: true });
         if (r.sudah) { flash('sudah', r.nama, 'Sudah tercatat ' + r.status + ' pukul ' + r.waktu.substring(11, 16)); bip(true); log('<i class="bi bi-info-circle text-primary"></i> ' + esc(r.nama) + ' (sudah)'); }
@@ -2014,7 +2119,10 @@ VIEWS.scanKartu = {
       } catch (e) {
         flash('err', 'Ditolak', e.message); bip(false);
         log('<i class="bi bi-x-circle text-danger"></i> ' + esc(e.message));
-      } finally { busy = false; QRS.busy = false; }
+      } finally {
+        busy = false; QRS.busy = false;
+        if (antre.length && el.isConnected) { const n = antre.shift(); lastCode = ''; proses(n); }
+      }
     }
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const v = input.value; input.value = ''; proses(v); } });
     if (presisi) input.addEventListener('blur', () => later(() => { if (el.isConnected && !$('.modal.show') && !camOn) input.focus(); }, 300));
@@ -2846,7 +2954,7 @@ VIEWS.dashGuru = {
   title: 'Dashboard',
   render: async function (el) {
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini') + spinner();
-    bindActs(el, { qr: id => navigate('qrDisplay', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
+    bindActs(el, { qr: id => navigate('qrDisplay', { id }), kartu: id => navigate('scanKartu', { id }), det: id => navigate('detailSesi', { id }), mon: id => navigate('monitorUjian', { id }) });
     await swr('dashGuru', 'dashboardGuru', {}, d => {
     if (!el.isConnected) return;
     el.innerHTML = pageHead('Halo, ' + S.user.nama, 'Ringkasan kegiatan mengajar hari ini',
@@ -2861,7 +2969,8 @@ VIEWS.dashGuru = {
         { h: 'Kelas / Mapel', f: s => '<b>' + esc(s.kelas) + '</b><div class="small text-muted">' + esc(s.mapel) + ' · ' + esc(s.jam) + '</div>' },
         { h: 'Hadir', f: s => s.hadir + '/' + s.total },
         { h: 'Status', f: s => badge(s.status) },
-        { h: '', cls: 'text-end', f: s => (s.status === 'AKTIF' && s.metode !== 'FACE' ? actBtn('qr', s.id, 'qr-code', 'QR', 'primary') + ' ' : '') + actBtn('det', s.id, 'list-check', 'Detail') }
+        { h: '', cls: 'text-end', f: s => (s.status === 'AKTIF' && metodeBoleh(s.metode, 'QR') ? actBtn('qr', s.id, 'qr-code', 'QR', 'primary') + ' ' : '') +
+          (s.status === 'AKTIF' && metodeBoleh(s.metode, 'KARTU') ? actBtn('kartu', s.id, 'upc-scan', 'Scan kartu', 'outline-success') + ' ' : '') + actBtn('det', s.id, 'list-check', 'Detail') }
       ], d.sesi, { empty: 'Belum ada sesi absensi hari ini' }) + '</div></div></div>' +
       '<div class="col-lg-6"><div class="card h-100"><div class="card-header">Ujian Berlangsung</div><div class="card-body">' +
       tableHtml([
@@ -2912,25 +3021,98 @@ VIEWS.laporan = {
   }
 };
 
-/** Ekspor laporan ke file Excel (.xlsx) langsung di browser (SheetJS) */
-const XLSX_LIB = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+/** Kop laporan (logo + nama sekolah), hanya tampil saat dicetak / disimpan PDF */
+function kopCetak() {
+  const st = S.settings || {};
+  return '<div class="print-kop">' + (LOGO.src ? '<img src="' + LOGO.src + '" alt="">' : '') +
+    '<div><div class="pk-sek">' + esc(st.nama_sekolah || '') + '</div><div class="pk-sub">Tahun Ajaran ' + esc(st.tahun_ajaran || '') + ' · Semester ' + esc(st.semester || '') + '</div></div></div>';
+}
+
+/** Ekspor laporan ke file Excel (.xlsx) lengkap dengan logo & kop sekolah (dibuat langsung di browser dengan JSZip) */
+const XLSX_LIB = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'; // dipakai untuk MEMBACA file (import Dapodik)
+const JSZIP_LIB = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
 async function exportExcel(r) {
   toast('Menyiapkan file Excel…', 'info');
-  await loadScript(XLSX_LIB);
+  await loadScript(JSZIP_LIB);
+  const blob = await buatXlsx(r, LOGO.src, S.settings || {}, S.user.nama);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = r.judul.replace(/[\\/:*?"<>|]+/g, '-') + '.xlsx'; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
+async function buatXlsx(r, logo, st, oleh) {
+  const X = s => String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const col = i => { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
   const heads = r.headers.map(h => String(h).replace(/\n/g, ' '));
-  const aoa = [[r.judul], [r.sub || ''], ['Dicetak: ' + new Date().toLocaleString('id-ID') + ' oleh ' + S.user.nama], [], heads].concat(r.rows);
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = heads.map((h, i) => ({ wch: i === 2 ? 28 : Math.max(6, Math.min(32, h.length + 2)) }));
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: Math.max(0, heads.length - 1) } }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Laporan');
-  XLSX.writeFile(wb, r.judul.replace(/[\\/:*?"<>|]+/g, '-') + '.xlsx');
+  const nC = Math.max(heads.length, 3), last = col(nC - 1);
+  const ada = !!logo && /^data:image\/(png|jpeg);base64,/.test(logo);
+  const tc = ada ? 2 : 0; // kolom awal teks kop (kolom A–B untuk logo)
+  // gaya: 0 biasa, 1 nama sekolah, 2 judul, 3 keterangan, 4 judul kolom, 5 sel tabel, 6 angka tabel
+  const cell = (ref, v, s) => {
+    if (v === '' || v == null) return s ? '<c r="' + ref + '" s="' + s + '"/>' : '';
+    if (typeof v === 'number' && isFinite(v)) return '<c r="' + ref + '" s="' + (s === 5 ? 6 : s || 0) + '"><v>' + v + '</v></c>';
+    return '<c r="' + ref + '" s="' + (s || 0) + '" t="inlineStr"><is><t xml:space="preserve">' + X(v) + '</t></is></c>';
+  };
+  const kop = [[st.nama_sekolah || '', 1, 24], [r.judul, 2, 20], [r.sub || '', 3, 16],
+    ['Tahun Ajaran ' + (st.tahun_ajaran || '') + ' · Semester ' + (st.semester || '') + ' · Dicetak ' + new Date().toLocaleString('id-ID') + ' oleh ' + (oleh || ''), 3, 16]];
+  let rows = kop.map((k, i) => '<row r="' + (i + 1) + '" ht="' + k[2] + '" customHeight="1">' + cell(col(tc) + (i + 1), k[0], k[1]) + '</row>').join('');
+  rows += '<row r="5" ht="8" customHeight="1"/>';
+  rows += '<row r="6">' + heads.map((h, i) => cell(col(i) + 6, h, 4)).join('') + '</row>';
+  r.rows.forEach((row, ri) => { rows += '<row r="' + (7 + ri) + '">' + heads.map((_, i) => cell(col(i) + (7 + ri), row[i] == null ? '' : row[i], 5)).join('') + '</row>'; });
+  const lebar = heads.map((h, i) => { const isi = Math.max(String(h).length, ...r.rows.slice(0, 300).map(x => String(x[i] == null ? '' : x[i]).length));
+    return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + (i === 2 ? Math.max(28, Math.min(40, isi + 2)) : Math.max(ada && i < 2 ? 7 : 5, Math.min(32, isi + 2))) + '" customWidth="1"/>'; }).join('');
+  const merges = [1, 2, 3, 4].map(i => '<mergeCell ref="' + col(tc) + i + ':' + last + i + '"/>').join('');
+  const sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="6" topLeftCell="A7" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+    '<cols>' + lebar + '</cols><sheetData>' + rows + '</sheetData><mergeCells count="4">' + merges + '</mergeCells>' +
+    '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="' + (nC > 10 ? 'landscape' : 'portrait') + '" fitToHeight="0"/>' +
+    '<printOptions horizontalCentered="1"/>' + (ada ? '<drawing r:id="rId1"/>' : '') + '</worksheet>';
+  const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="5"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font><font><b/><sz val="12"/><name val="Arial"/></font>' +
+    '<font><sz val="9"/><color rgb="FF475569"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts>' +
+    '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E3A8A"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="7">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+    '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+    '<xf numFmtId="0" fontId="4" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+    '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  const z = new JSZip();
+  const ext = ada ? (logo.indexOf('image/jpeg') > 0 ? 'jpeg' : 'png') : '';
+  z.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+    (ada ? '<Default Extension="' + ext + '" ContentType="image/' + ext + '"/>' : '') +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    (ada ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : '') + '</Types>');
+  z.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
+  z.file('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Laporan" sheetId="1" r:id="rId1"/></sheets>' +
+    '<definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">Laporan!$6:$6</definedName></definedNames></workbook>');
+  z.file('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  z.file('xl/styles.xml', styles);
+  z.file('xl/worksheets/sheet1.xml', sheet);
+  if (ada) {
+    const E = 9525, px = 72; // logo 72×72 piksel di pojok kiri atas
+    z.file('xl/worksheets/_rels/sheet1.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>');
+    z.file('xl/drawings/_rels/drawing1.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo.' + ext + '"/></Relationships>');
+    z.file('xl/drawings/drawing1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<xdr:oneCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>' + 4 * E + '</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>' + 3 * E + '</xdr:rowOff></xdr:from><xdr:ext cx="' + px * E + '" cy="' + px * E + '"/>' +
+      '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Logo"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
+      '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + px * E + '" cy="' + px * E + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>');
+    z.file('xl/media/logo.' + ext, logo.split(',')[1], { base64: true });
+  }
+  return z.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
 }
 
 /** Menampilkan laporan generik {judul, sub, headers, rows, chart} */
 function renderReport(box, r, tab) {
   const isMatrix = !!r.matrix;
-  box.innerHTML = '<div class="card"><div class="card-body">' +
+  box.innerHTML = '<div class="card"><div class="card-body">' + kopCetak() +
     '<div class="d-flex flex-wrap justify-content-between gap-2 mb-3"><div><h5 class="fw-bold mb-0">' + esc(r.judul) + '</h5><div class="small text-muted">' + esc(r.sub || '') + '</div></div>' +
     '<div class="d-flex flex-wrap gap-2 no-print"><button class="btn btn-sm btn-outline-success" data-act="excel"><i class="bi bi-file-earmark-excel"></i> Excel</button>' +
     '<button class="btn btn-sm btn-outline-danger" data-act="print" title="Pilih \'Simpan sebagai PDF\' pada jendela cetak"><i class="bi bi-file-earmark-pdf"></i> PDF / Cetak</button>' +
