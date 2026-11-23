@@ -420,6 +420,15 @@ async function getMaster(force) {
 }
 function kelasOpts() { return (S.master ? S.master.kelas : []).map(k => [k.id, k.nama_kelas]); }
 function mapelOpts() { return (S.master ? S.master.mapel : []).map(m => [m.id, m.nama_mapel]); }
+/* tingkat kelas: 7 → "VII". Soal tanpa tingkat = "Umum" (berlaku untuk semua tingkat) */
+const ROMAWI = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+function romawi(n) { return ROMAWI[+n] || ''; }
+function tingkatLabel(t) { return t ? 'Kelas ' + romawi(t) : 'Umum'; }
+// tingkat yang dipakai kelas-kelas di sekolah (jika belum ada kelas bertingkat: VII–IX)
+function tingkatOpts() {
+  const ada = [...new Set((S.master ? S.master.kelas : []).map(k => k.tingkat).filter(Boolean))].sort((a, b) => a - b);
+  return (ada.length ? ada : [7, 8, 9]).map(t => [String(t), 'Kelas ' + romawi(t)]);
+}
 function guruOpts() { return (S.master ? S.master.guru : []).map(g => [g.id, g.nama]); }
 function optionsHtml(opts, val, placeholder) {
   return (placeholder !== false ? '<option value="">' + esc(placeholder || '— pilih —') + '</option>' : '') +
@@ -461,13 +470,14 @@ function closeModal() { if (_modal) _modal.hide(); }
 
 function fieldHtml(f, v) {
   const id = 'f_' + f.name;
-  const req = f.required ? ' required' : '';
+  const req = (f.required ? ' required' : '') + (f.disabled ? ' disabled' : '');
   if (v === undefined || v === null) v = f.value !== undefined ? f.value : '';
   if (f.type === 'hidden') return '<input type="hidden" name="' + f.name + '" value="' + esc(v) + '">';
   if (f.type === 'html') return '<div class="' + (f.col || 'col-12') + '">' + f.html + '</div>';
   if (f.type === 'checkbox') {
     return '<div class="' + (f.col || 'col-12') + ' mb-2" data-field="' + f.name + '"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="' + id + '" name="' + f.name + '"' +
-      (v === true || v === 'true' ? ' checked' : '') + '><label class="form-check-label" for="' + id + '">' + esc(f.label) + '</label></div></div>';
+      (v === true || v === 'true' ? ' checked' : '') + (f.disabled ? ' disabled' : '') + '><label class="form-check-label" for="' + id + '">' + esc(f.label) + '</label></div>' +
+      (f.help ? '<div class="form-text">' + esc(f.help) + '</div>' : '') + '</div>';
   }
   let input;
   if (f.type === 'select') {
@@ -566,7 +576,7 @@ function renderShell() {
     (!isSiswa ? '<button class="btn btn-link text-white d-lg-none p-1 me-1" data-bs-toggle="offcanvas" data-bs-target="#sidebar"><i class="bi bi-list fs-3"></i></button>' : '') +
     '<span class="navbar-brand me-auto text-truncate d-flex align-items-center gap-2">' + LOGO.html('nav-logo') + '<span class="text-truncate">' + esc(S.settings.nama_sekolah || 'SIAKAD Mini') + '</span></span>' +
     '<div class="dropdown"><button class="btn btn-sm btn-outline-light dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-person-circle"></i> <span class="d-none d-sm-inline">' + esc(u.nama) + '</span></button>' +
-    '<ul class="dropdown-menu dropdown-menu-end"><li><h6 class="dropdown-header">' + esc(u.nama) + '<br><small>' + esc(ROLE_LABEL[u.role]) + (u.kelas ? ' · ' + esc(u.kelas) : '') + '</small></h6></li>' +
+    '<ul class="dropdown-menu dropdown-menu-end"><li><h6 class="dropdown-header">' + esc(u.nama) + '<br><small>' + esc(u.super_admin ? 'Super Admin' : ROLE_LABEL[u.role]) + (u.kelas ? ' · ' + esc(u.kelas) : '') + '</small></h6></li>' +
     '<li><a class="dropdown-item" href="#" data-nav="profil"><i class="bi bi-person-vcard"></i> Profil Saya</a></li>' +
     '<li><a class="dropdown-item" href="#" data-nav="__password"><i class="bi bi-key"></i> Ganti Password</a></li>' +
     '<li><hr class="dropdown-divider"></li><li><a class="dropdown-item text-danger" href="#" data-nav="__logout"><i class="bi bi-box-arrow-right"></i> Keluar</a></li></ul></div>' +
@@ -806,6 +816,9 @@ VIEWS.users = {
   render: async function (el) {
     await getMaster(true);
     let role = 'siswa', rows = [], q = '', kelas = '';
+    const SUP = !!S.user.super_admin;
+    // akun admin hanya boleh dikelola Super Admin; admin biasa tetap boleh mengubah akunnya sendiri
+    const bolehKelola = u => u.role !== 'admin' || SUP || u.id === S.user.id;
     el.innerHTML = pageHead('Manajemen Pengguna', 'Akun siswa, guru, dan admin. Password awal akun baru = username.',
       '<button class="btn btn-outline-success btn-sm" data-act="cetakKartu"><i class="bi bi-printer"></i> Cetak Kartu</button>' +
       '<button class="btn btn-outline-success btn-sm" data-act="fotoMassal"><i class="bi bi-images"></i> Unggah Foto</button>' +
@@ -818,6 +831,9 @@ VIEWS.users = {
       '<div class="row g-2 mb-3"><div class="col-md-5"><input class="form-control" id="uq" placeholder="Cari nama / username…"></div>' +
       '<div class="col-md-4" id="ukWrap"><select class="form-select" id="uk">' + optionsHtml(kelasOpts(), '', 'Semua kelas') + '</select></div>' +
       '<div class="col-md-3 text-md-end small text-muted align-self-center" id="ucount"></div></div>' +
+      '<div id="uInfoAdmin" class="alert alert-info small py-2" style="display:none"><i class="bi bi-shield-lock"></i> ' +
+        (SUP ? 'Anda <b>Super Admin</b>: hanya Super Admin yang dapat menambah, mengubah, atau menghapus akun admin. Centang <b>Super Admin</b> di form untuk memberi hak yang sama.'
+             : 'Akun admin hanya dapat dikelola oleh <b>Super Admin</b>. Anda tetap dapat mengubah akun Anda sendiri.') + '</div>' +
       '<div id="utable">' + spinner() + '</div></div></div>';
 
     async function refreshKelas() {
@@ -831,7 +847,7 @@ VIEWS.users = {
       $('#ucount', el).textContent = list.length + ' pengguna';
       const cols = [
         { h: 'Username', f: u => '<code>' + esc(u.username) + '</code>' },
-        { h: 'Nama', f: u => esc(u.nama) + (u.piket ? ' <span class="badge text-bg-warning" title="Petugas piket absen harian">Piket</span>' : '') },
+        { h: 'Nama', f: u => esc(u.nama) + (u.super_admin ? ' <span class="badge text-bg-danger" title="Boleh mengelola akun admin">Super Admin</span>' : '') + (u.piket ? ' <span class="badge text-bg-warning" title="Petugas piket absen harian">Piket</span>' : '') },
         { h: 'L/P', cls: 'text-center', f: u => jkBadge(u.jk) },
       ];
       if (role === 'siswa') {
@@ -844,7 +860,8 @@ VIEWS.users = {
         (role === 'siswa' ? actBtn('kartu', u.id, 'person-badge', 'Kartu QR (cetak / ganti jika hilang)', 'outline-success') + ' ' : '') +
         (role === 'siswa' && u.face === 'TERDAFTAR' ? actBtn('face', u.id, 'person-bounding-box', 'Izinkan daftar ulang wajah') + ' ' : '') +
         (role === 'siswa' && u.face !== 'BELUM' ? actBtn('delFace', u.id, 'person-x', 'Hapus data wajah', 'outline-warning') + ' ' : '') +
-        actBtn('edit', u.id, 'pencil', 'Ubah') + ' ' + actBtn('del', u.id, 'trash', 'Hapus', 'outline-danger') });
+        (bolehKelola(u) ? actBtn('edit', u.id, 'pencil', 'Ubah') + (u.id === S.user.id ? '' : ' ' + actBtn('del', u.id, 'trash', 'Hapus', 'outline-danger'))
+          : '<span class="small text-muted" title="Hanya Super Admin yang dapat mengelola akun admin"><i class="bi bi-lock"></i> Super Admin</span>') });
       $('#utable', el).innerHTML = tableHtml(cols, list, { empty: 'Belum ada pengguna' });
     }
     async function userForm(u) {
@@ -867,14 +884,19 @@ VIEWS.users = {
           { name: 'id', type: 'hidden' },
           { name: 'username', label: 'Username (NIS untuk siswa / NIP untuk guru)', required: true, col: 'col-md-6' },
           { name: 'nama', label: 'Nama lengkap', required: true, col: 'col-md-6' },
-          { name: 'role', label: 'Role', type: 'select', options: [['siswa', 'Siswa'], ['guru', 'Guru'], ['admin', 'Admin']], placeholder: false, col: 'col-md-6' },
+          { name: 'role', label: 'Role', type: 'select', placeholder: false, col: 'col-md-6',
+            options: [['siswa', 'Siswa'], ['guru', 'Guru']].concat(SUP || u.role === 'admin' ? [['admin', 'Admin']] : []),
+            disabled: u.id === S.user.id, help: u.id === S.user.id ? 'Role akun sendiri tidak bisa diubah' : '' },
           { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), col: 'col-md-6' },
           { name: 'password', label: 'Password', type: 'password', help: u.id ? 'Kosongkan jika tidak diubah' : 'Kosongkan = sama dengan username', col: 'col-md-6', autocomplete: 'new-password' },
           { name: 'status', label: 'Status', type: 'select', options: [['AKTIF', 'Aktif'], ['NONAKTIF', 'Nonaktif']], placeholder: false, col: 'col-md-6' },
           { name: 'piket', label: 'Petugas piket — boleh membuka & memindai absen harian semua kelas', type: 'checkbox' }
-        ].concat(biodataFields()),
+        ].concat(SUP ? [{ name: 'super_admin', label: 'Super Admin — boleh menambah, mengubah, dan menghapus akun admin', type: 'checkbox',
+            disabled: u.id === S.user.id && u.super_admin, help: u.id === S.user.id && u.super_admin ? 'Status Super Admin akun sendiri hanya bisa dicabut oleh Super Admin lain' : '' }] : [])
+        .concat(biodataFields()),
         onRender: form => {
-          const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); showField(form, 'piket', form.role.value === 'guru'); toggleBiodata(form, form.role.value); };
+          const t = () => { showField(form, 'kelas_id', form.role.value === 'siswa'); showField(form, 'piket', form.role.value === 'guru');
+            if (form.super_admin) showField(form, 'super_admin', form.role.value === 'admin'); toggleBiodata(form, form.role.value); };
           form.role.onchange = t; t();
           const fi = $('#ufFotoFile');
           if (fi) {
@@ -890,7 +912,10 @@ VIEWS.users = {
             $('#ufFotoDel').onclick = async () => { try { await setFoto(''); } catch (err) { } };
           }
         },
-        onSubmit: async d => { delete d._bio; await api('saveUser', d); toast('Data pengguna disimpan', 'success'); S.master = null; load(); }
+        onSubmit: async d => { delete d._bio;
+          if (u.id === S.user.id) { d.role = u.role; if (u.super_admin) d.super_admin = true; }
+          await api('saveUser', d);
+          if (u.id === S.user.id) { const me = await api('me', {}); S.user = Object.assign(S.user, me.user); } toast('Data pengguna disimpan', 'success'); S.master = null; load(); }
       });
     }
     function importDlg() {
@@ -922,9 +947,10 @@ VIEWS.users = {
         role = r;
         $$('#roleTabs .nav-link', el).forEach(a => a.classList.toggle('active', a.dataset.id === r));
         $('#ukWrap', el).style.display = r === 'siswa' ? '' : 'none';
+        $('#uInfoAdmin', el).style.display = r === 'admin' ? '' : 'none';
         load();
       },
-      add: () => userForm(),
+      add: () => { if (role === 'admin' && !SUP) return toast('Hanya Super Admin yang dapat menambah akun admin', 'warning'); userForm(); },
       edit: id => userForm(Object.assign({}, rows.find(x => x.id === id))),
       del: async id => {
         const u = rows.find(x => x.id === id);
@@ -966,7 +992,9 @@ VIEWS.master = {
     async function load() {
       M = await getMaster(true);
       $('#tKelas', el).innerHTML = tableHtml([
-        { h: 'Kelas', f: k => '<b>' + esc(k.nama_kelas) + '</b>' }, { h: 'Wali kelas', f: k => esc(k.wali_kelas || '-') },
+        { h: 'Kelas', f: k => '<b>' + esc(k.nama_kelas) + '</b>' },
+        { h: 'Tingkat', f: k => k.tingkat ? esc(romawi(k.tingkat)) : '<span class="text-muted small" title="Ujian kelas ini hanya memakai soal Umum">–</span>' },
+        { h: 'Wali kelas', f: k => esc(k.wali_kelas || '-') },
         { h: 'Siswa', f: k => '<b>' + k.jumlah_siswa + '</b>' + (k.jumlah_l || k.jumlah_p ? ' <span class="small text-muted">(L ' + k.jumlah_l + ' · P ' + k.jumlah_p + ')</span>' : '') },
         { h: 'Mode absen', f: k => badge(MODE_LABEL[k.mode_absensi] || k.mode_absensi, 'light') },
         { h: 'TA', f: k => esc(k.tahun_ajaran) },
@@ -979,8 +1007,11 @@ VIEWS.master = {
     }
     const kelasForm = k => formModal({
       title: k ? 'Ubah Kelas' : 'Tambah Kelas', values: k || { tahun_ajaran: S.settings.tahun_ajaran, mode_absensi: 'MAPEL' },
-      fields: [{ name: 'id', type: 'hidden' }, { name: 'nama_kelas', label: 'Nama kelas', required: true, placeholder: 'mis. X-IPA-1' },
-        { name: 'wali_kelas_id', label: 'Wali kelas', type: 'select', options: guruOpts() }, { name: 'tahun_ajaran', label: 'Tahun ajaran' },
+      fields: [{ name: 'id', type: 'hidden' }, { name: 'nama_kelas', label: 'Nama kelas', required: true, placeholder: 'mis. VII A' },
+        { name: 'tingkat', label: 'Tingkat', type: 'select', placeholder: 'Otomatis dari nama kelas', col: 'col-md-6',
+          options: ROMAWI.slice(1).map((r, i) => [String(i + 1), r + ' (' + (i + 1) + ')']), help: 'Menentukan soal yang dipakai ujian kelas ini' },
+        { name: 'tahun_ajaran', label: 'Tahun ajaran', col: 'col-md-6' },
+        { name: 'wali_kelas_id', label: 'Wali kelas', type: 'select', options: guruOpts() },
         { name: 'mode_absensi', label: 'Mode absensi', type: 'select', placeholder: false, options: MODE_OPSI, help: 'Wali kelas juga dapat mengubahnya dari menu Absen Harian' }],
       onSubmit: async d => { await api('saveKelas', d); toast('Kelas disimpan', 'success'); load(); }
     });
@@ -2652,44 +2683,81 @@ VIEWS.bankSoal = {
   title: 'Bank Soal',
   render: async function (el) {
     await getMaster();
-    let mapel = store.get('lastMapel') || '', rows = [], q = '';
-    el.innerHTML = pageHead('Bank Soal', 'Soal per mata pelajaran. Ujian mengambil soal dari sini (bisa diacak).',
+    // tingkat: '' = semua soal, 'umum' = soal tanpa tingkat, '7' = kelas VII …
+    let mapel = store.get('lastMapel') || '', tingkat = store.get('lastTingkat') || '', rows = [], q = '';
+    const pilih = new Set();
+    el.innerHTML = pageHead('Bank Soal', 'Soal per mata pelajaran dan tingkat kelas. Ujian kelas VII hanya mengambil soal Kelas VII ditambah soal Umum.',
       '<button class="btn btn-outline-primary btn-sm" data-act="import"><i class="bi bi-upload"></i> Import</button>' +
       '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Tambah Soal</button>') +
-      '<div class="card mb-3"><div class="card-body row g-2"><div class="col-md-5"><select class="form-select" id="bMapel">' + optionsHtml(mapelOpts(), mapel, '— pilih mata pelajaran —') + '</select></div>' +
-      '<div class="col-md-5"><input class="form-control" id="bQ" placeholder="Cari teks soal…"></div><div class="col-md-2 align-self-center small text-muted" id="bCount"></div></div></div>' +
+      '<div class="card mb-3"><div class="card-body row g-2"><div class="col-md-4"><select class="form-select" id="bMapel">' + optionsHtml(mapelOpts(), mapel, '— pilih mata pelajaran —') + '</select></div>' +
+      '<div class="col-md-3"><select class="form-select" id="bTingkat"></select></div>' +
+      '<div class="col-md-3"><input class="form-control" id="bQ" placeholder="Cari teks soal…"></div><div class="col-md-2 align-self-center small text-muted" id="bCount"></div></div></div>' +
+      '<div id="bBar" class="alert alert-primary py-2 small d-flex flex-wrap align-items-center gap-2" style="display:none!important"></div>' +
       '<div id="bList"></div>';
+    const cocok = r => !tingkat || (tingkat === 'umum' ? !r.tingkat : String(r.tingkat) === tingkat);
+    function drawTingkat() {
+      const n = t => rows.filter(r => t === 'umum' ? !r.tingkat : String(r.tingkat) === t).length;
+      const lain = [...new Set(rows.map(r => r.tingkat).filter(Boolean).map(String))];
+      const opts = tingkatOpts(); lain.forEach(t => { if (!opts.some(o => o[0] === t)) opts.push([t, 'Kelas ' + romawi(t)]); });
+      opts.sort((a, b) => a[0] - b[0]);
+      $('#bTingkat', el).innerHTML = '<option value="">Semua tingkat' + (mapel ? ' (' + rows.length + ')' : '') + '</option>' +
+        opts.map(o => '<option value="' + o[0] + '"' + (o[0] === tingkat ? ' selected' : '') + '>' + esc(o[1]) + (mapel ? ' (' + n(o[0]) + ')' : '') + '</option>').join('') +
+        '<option value="umum"' + (tingkat === 'umum' ? ' selected' : '') + '>Umum – semua tingkat' + (mapel ? ' (' + n('umum') + ')' : '') + '</option>';
+    }
     async function load() {
-      if (!mapel) { $('#bList', el).innerHTML = emptyState('Pilih mata pelajaran terlebih dahulu', 'journal'); $('#bCount', el).textContent = ''; return; }
+      pilih.clear();
+      if (!mapel) { rows = []; drawTingkat(); drawBar(); $('#bList', el).innerHTML = emptyState('Pilih mata pelajaran terlebih dahulu', 'journal'); $('#bCount', el).textContent = ''; return; }
       $('#bList', el).innerHTML = spinner();
       rows = await api('listSoal', { mapel_id: mapel }, { silent: true });
-      draw();
+      drawTingkat(); draw();
+    }
+    function drawBar() {
+      const bar = $('#bBar', el);
+      if (!pilih.size) { bar.style.setProperty('display', 'none', 'important'); return; }
+      bar.style.removeProperty('display');
+      bar.innerHTML = '<b>' + pilih.size + ' soal dipilih</b><span>Pindahkan ke:</span>' +
+        '<select class="form-select form-select-sm w-auto" id="bPindahKe">' + optionsHtml(tingkatOpts(), '', false) + '<option value="">Umum – semua tingkat</option></select>' +
+        '<button class="btn btn-sm btn-primary" data-act="pindah"><i class="bi bi-arrow-left-right"></i> Pindahkan</button>' +
+        '<button class="btn btn-sm btn-light" data-act="batal">Batal pilih</button>';
     }
     function draw() {
-      const list = rows.filter(r => !q || r.pertanyaan.toLowerCase().includes(q));
+      const list = rows.filter(r => cocok(r) && (!q || r.pertanyaan.toLowerCase().includes(q)));
       $('#bCount', el).textContent = list.length + ' soal';
-      $('#bList', el).innerHTML = list.length ? list.map((r, i) => {
+      const semua = list.length && list.every(r => pilih.has(r.id));
+      $('#bList', el).innerHTML = list.length ? '<div class="form-check small mb-2 ms-1"><input class="form-check-input" type="checkbox" id="bAll"' + (semua ? ' checked' : '') + '>' +
+        '<label class="form-check-label" for="bAll">Pilih semua soal yang tampil (untuk dipindah tingkatnya)</label></div>' + list.map((r, i) => {
         let opsi = '';
         if (r.tipe === 'PG') opsi = ['A', 'B', 'C', 'D', 'E'].filter(k => r['opsi_' + k.toLowerCase()]).map(k =>
           '<div class="' + (r.kunci === k ? 'kunci' : '') + '">' + k + '. ' + esc(r['opsi_' + k.toLowerCase()]) + (r.kunci === k ? ' <i class="bi bi-check-lg"></i>' : '') + '</div>').join('');
         else if (r.tipe === 'BS') opsi = '<div class="kunci">Kunci: ' + (r.kunci === 'B' ? 'Benar' : 'Salah') + '</div>';
         else opsi = '<div class="text-muted"><i>Pedoman: ' + esc(r.kunci || '-') + '</i></div>';
-        return '<div class="card soal-card mb-2"><div class="card-body"><div class="d-flex gap-2 align-items-start"><span class="badge text-bg-light border">' + (i + 1) + '</span>' +
-          '<div class="flex-grow-1"><div class="mb-1">' + badge(TIPE_LABEL[r.tipe], 'info') + ' <span class="small text-muted">bobot ' + esc(r.bobot) + '</span></div>' +
+        return '<div class="card soal-card mb-2"><div class="card-body"><div class="d-flex gap-2 align-items-start">' +
+          '<input class="form-check-input mt-1 b-pilih" type="checkbox" data-id="' + esc(r.id) + '"' + (pilih.has(r.id) ? ' checked' : '') + ' title="Pilih">' +
+          '<span class="badge text-bg-light border">' + (i + 1) + '</span>' +
+          '<div class="flex-grow-1"><div class="mb-1">' + badge(TIPE_LABEL[r.tipe], 'info') + ' ' + badge(tingkatLabel(r.tingkat), r.tingkat ? 'primary' : 'secondary') +
+          ' <span class="small text-muted">bobot ' + esc(r.bobot) + '</span></div>' +
           '<div style="white-space:pre-wrap">' + esc(r.pertanyaan) + '</div>' + (r.gambar_url ? '<img src="' + esc(driveImg(r.gambar_url)) + '" class="img-fluid rounded my-2" style="max-height:160px">' : '') +
           '<div class="opsi mt-2">' + opsi + '</div></div><div class="text-nowrap">' + actBtn('edit', r.id, 'pencil', 'Ubah') + ' ' + actBtn('del', r.id, 'trash', 'Hapus', 'outline-danger') + '</div></div></div></div>';
-      }).join('') : emptyState('Belum ada soal untuk mapel ini');
+      }).join('') : emptyState(rows.length ? 'Tidak ada soal untuk pilihan ini' : 'Belum ada soal untuk mapel ini');
+      const all = $('#bAll', el);
+      if (all) all.onchange = e => { list.forEach(r => e.target.checked ? pilih.add(r.id) : pilih.delete(r.id)); draw(); };
+      $$('.b-pilih', el).forEach(c => c.onchange = e => { e.target.checked ? pilih.add(e.target.dataset.id) : pilih.delete(e.target.dataset.id); drawBar();
+        const a = $('#bAll', el); if (a) a.checked = list.every(r => pilih.has(r.id)); });
+      drawBar();
     }
+    const tingkatField = () => ({ name: 'tingkat', label: 'Tingkat kelas', type: 'select', placeholder: 'Umum – semua tingkat', options: tingkatOpts(), col: 'col-md-4',
+      help: 'Umum = bisa dipakai ujian semua tingkat' });
     function soalForm(r) {
       if (!mapel) return toast('Pilih mata pelajaran dulu', 'warning');
-      r = Object.assign({ tipe: 'PG', bobot: 1 }, r || {});
-      const v = Object.assign({}, r, { kunci_pg: r.tipe === 'PG' ? r.kunci : 'A', kunci_bs: r.tipe === 'BS' ? r.kunci : 'B', kunci_esai: r.tipe === 'ESAI' ? r.kunci : '' });
+      r = Object.assign({ tipe: 'PG', bobot: 1, tingkat: /^\d+$/.test(tingkat) ? tingkat : '' }, r || {});
+      const v = Object.assign({}, r, { tingkat: r.tingkat ? String(r.tingkat) : '', kunci_pg: r.tipe === 'PG' ? r.kunci : 'A', kunci_bs: r.tipe === 'BS' ? r.kunci : 'B', kunci_esai: r.tipe === 'ESAI' ? r.kunci : '' });
       formModal({
         title: r.id ? 'Ubah Soal' : 'Tambah Soal', size: 'lg', values: v,
         fields: [
           { name: 'id', type: 'hidden' },
-          { name: 'tipe', label: 'Tipe soal', type: 'select', placeholder: false, options: Object.keys(TIPE_LABEL).map(k => [k, TIPE_LABEL[k]]), col: 'col-md-6' },
-          { name: 'bobot', label: 'Bobot / skor maksimal', type: 'number', min: 1, col: 'col-md-6' },
+          tingkatField(),
+          { name: 'tipe', label: 'Tipe soal', type: 'select', placeholder: false, options: Object.keys(TIPE_LABEL).map(k => [k, TIPE_LABEL[k]]), col: 'col-md-4' },
+          { name: 'bobot', label: 'Bobot / skor maksimal', type: 'number', min: 1, col: 'col-md-4' },
           { name: 'pertanyaan', label: 'Pertanyaan', type: 'textarea', rows: 4, required: true },
           { name: 'gambar_url', label: 'URL gambar (opsional)', help: 'Link gambar publik atau link Google Drive (bagikan: siapa saja yang memiliki link)' },
           { name: 'opsi_a', label: 'Opsi A', col: 'col-md-6' }, { name: 'opsi_b', label: 'Opsi B', col: 'col-md-6' },
@@ -2716,13 +2784,17 @@ VIEWS.bankSoal = {
     }
     function importDlg() {
       if (!mapel) return toast('Pilih mata pelajaran dulu', 'warning');
+      const nmMapel = (mapelOpts().find(m => m[0] === mapel) || [, ''])[1];
       const el2 = modal({
-        title: 'Import Soal (salin dari Spreadsheet)', size: 'xl',
-        body: '<p class="small mb-2">Buat tabel di Google Sheets/Excel dengan kolom berikut, blok semua baris, salin, lalu tempel di bawah.</p>' +
-          '<div class="table-responsive"><table class="table table-sm table-bordered small"><tr class="table-light"><th>tipe</th><th>pertanyaan</th><th>opsi_a</th><th>opsi_b</th><th>opsi_c</th><th>opsi_d</th><th>opsi_e</th><th>kunci</th><th>bobot</th><th>gambar_url</th></tr>' +
-          '<tr><td>PG</td><td>2 + 3 = …</td><td>4</td><td>5</td><td>6</td><td>7</td><td></td><td>B</td><td>1</td><td></td></tr>' +
-          '<tr><td>BS</td><td>Matahari terbit dari timur.</td><td></td><td></td><td></td><td></td><td></td><td>B</td><td>1</td><td></td></tr>' +
-          '<tr><td>ESAI</td><td>Jelaskan fotosintesis!</td><td></td><td></td><td></td><td></td><td></td><td>pedoman jawaban</td><td>5</td><td></td></tr></table></div>' +
+        title: 'Import Soal – ' + nmMapel, size: 'xl',
+        body: '<div class="row g-2 align-items-end mb-3"><div class="col-md-4"><label class="form-label small fw-semibold mb-1" for="sqTingkat">Masukkan ke tingkat</label>' +
+          '<select class="form-select" id="sqTingkat">' + optionsHtml(tingkatOpts(), /^\d+$/.test(tingkat) ? tingkat : '', 'Umum – semua tingkat') + '</select></div>' +
+          '<div class="col-md-8 small text-muted">Dipakai untuk semua baris. Baris yang kolom <b>tingkat</b>-nya diisi (VII / VIII / IX atau 7 / 8 / 9) mengikuti isi kolom itu.</div></div>' +
+          '<p class="small mb-2">Buat tabel di Google Sheets/Excel dengan kolom berikut, blok semua baris, salin, lalu tempel di bawah. Kolom <b>tingkat</b> boleh dikosongkan atau tidak ada.</p>' +
+          '<div class="table-responsive"><table class="table table-sm table-bordered small"><tr class="table-light"><th>tipe</th><th>pertanyaan</th><th>opsi_a</th><th>opsi_b</th><th>opsi_c</th><th>opsi_d</th><th>opsi_e</th><th>kunci</th><th>bobot</th><th>gambar_url</th><th>tingkat</th></tr>' +
+          '<tr><td>PG</td><td>2 + 3 = …</td><td>4</td><td>5</td><td>6</td><td>7</td><td></td><td>B</td><td>1</td><td></td><td>VII</td></tr>' +
+          '<tr><td>BS</td><td>Matahari terbit dari timur.</td><td></td><td></td><td></td><td></td><td></td><td>B</td><td>1</td><td></td><td></td></tr>' +
+          '<tr><td>ESAI</td><td>Jelaskan fotosintesis!</td><td></td><td></td><td></td><td></td><td></td><td>pedoman jawaban</td><td>5</td><td></td><td>8</td></tr></table></div>' +
           '<textarea id="sqText" class="form-control font-monospace small" rows="8" placeholder="Tempel di sini…"></textarea><div id="sqRes" class="mt-2"></div>',
         footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button><button class="btn btn-primary" id="sqGo"><i class="bi bi-upload"></i> Import</button>'
       });
@@ -2733,7 +2805,8 @@ VIEWS.bankSoal = {
         const btn = $('#sqGo', el2); btn.disabled = true;
         try {
           const r = await api('importSoal', {
-            mapel_id: mapel, rows: lines.map(c => ({ tipe: c[0], pertanyaan: c[1], opsi_a: c[2], opsi_b: c[3], opsi_c: c[4], opsi_d: c[5], opsi_e: c[6], kunci: c[7], bobot: c[8], gambar_url: c[9] }))
+            mapel_id: mapel, tingkat: $('#sqTingkat', el2).value,
+            rows: lines.map(c => ({ tipe: c[0], pertanyaan: c[1], opsi_a: c[2], opsi_b: c[3], opsi_c: c[4], opsi_d: c[5], opsi_e: c[6], kunci: c[7], bobot: c[8], gambar_url: c[9], tingkat: c[10] || '' }))
           });
           $('#sqRes', el2).innerHTML = '<div class="alert alert-success small py-2">' + r.added + ' soal berhasil diimpor.</div>' +
             (r.errors.length ? '<div class="alert alert-warning small py-2" style="max-height:160px;overflow:auto">' + r.errors.map(esc).join('<br>') + '</div>' : '');
@@ -2744,9 +2817,16 @@ VIEWS.bankSoal = {
     bindActs(el, {
       add: () => soalForm(), import: importDlg,
       edit: id => soalForm(rows.find(r => r.id === id)),
-      del: async id => { if (await confirmDlg('Hapus soal ini dari bank soal?', 'Hapus', 'danger')) { await api('deleteSoal', { id }); toast('Soal dihapus', 'success'); load(); } }
+      del: async id => { if (await confirmDlg('Hapus soal ini dari bank soal?', 'Hapus', 'danger')) { await api('deleteSoal', { id }); toast('Soal dihapus', 'success'); load(); } },
+      batal: () => { pilih.clear(); draw(); },
+      pindah: async () => {
+        const ke = $('#bPindahKe', el).value;
+        const r = await api('pindahTingkatSoal', { ids: [...pilih], tingkat: ke });
+        toast(r.jumlah + ' soal dipindah ke ' + tingkatLabel(r.tingkat), 'success'); load();
+      }
     });
     $('#bMapel', el).onchange = e => { mapel = e.target.value; store.set('lastMapel', mapel); load(); };
+    $('#bTingkat', el).onchange = e => { tingkat = e.target.value; store.set('lastTingkat', tingkat); pilih.clear(); draw(); };
     $('#bQ', el).oninput = e => { q = e.target.value.toLowerCase(); draw(); };
     load();
   }
@@ -2793,6 +2873,7 @@ VIEWS.ujianGuru = {
           { name: 'jenis', label: 'Jenis', type: 'select', placeholder: false, options: Object.keys(JENIS_LABEL).map(k => [k, JENIS_LABEL[k]]), col: 'col-md-4' },
           { name: 'kelas_id', label: 'Kelas', type: 'select', options: kelasOpts(), required: true, col: 'col-md-4' },
           { name: 'mapel_id', label: 'Mapel (sumber bank soal)', type: 'select', options: mapelOpts(), required: true, col: 'col-md-4' },
+          { name: '_infoSoal', type: 'html', html: '<div id="ujInfoSoal" class="small text-muted mb-2"></div>' },
           { name: 'tanggal_mulai', label: 'Dibuka mulai', type: 'datetime-local', required: true, col: 'col-md-6' },
           { name: 'tanggal_selesai', label: 'Ditutup pada', type: 'datetime-local', required: true, col: 'col-md-6' },
           { name: 'durasi_menit', label: 'Durasi pengerjaan (menit)', type: 'number', min: 1, required: true, col: 'col-md-4' },
@@ -2804,6 +2885,22 @@ VIEWS.ujianGuru = {
           { name: 'acak_opsi', label: 'Acak urutan opsi jawaban', type: 'checkbox', col: 'col-md-4' },
           { name: 'tampilkan_nilai', label: 'Tampilkan nilai ke siswa', type: 'checkbox', col: 'col-md-4' }
         ],
+        onRender: form => {
+          let urut = 0;
+          const info = async () => {
+            const box = $('#ujInfoSoal'), k = form.kelas_id.value, m = form.mapel_id.value, no = ++urut;
+            if (!k || !m) { box.innerHTML = ''; return; }
+            try {
+              const r = await api('hitungSoal', { kelas_id: k, mapel_id: m }, { silent: true, quiet: true });
+              if (no !== urut) return;
+              const kurang = r.jumlah < (+form.jumlah_soal.value || 0);
+              box.className = 'small mb-2 ' + (kurang ? 'text-danger' : 'text-success');
+              box.innerHTML = '<i class="bi bi-journal-check"></i> Soal tersedia untuk kelas ini: <b>' + r.jumlah + '</b> ' +
+                (r.tingkat ? '(Kelas ' + esc(romawi(r.tingkat)) + ' + Umum)' : '(kelas belum punya tingkat — hanya soal Umum)') + (kurang ? ' — kurang dari jumlah soal yang diminta' : '');
+            } catch (e) { box.innerHTML = ''; }
+          };
+          form.kelas_id.addEventListener('change', info); form.mapel_id.addEventListener('change', info); form.jumlah_soal.addEventListener('input', info); info();
+        },
         onSubmit: async d => { const r = await api('saveUjian', d); toast('Ujian disimpan. Token: ' + r.token_ujian, 'success'); load(); }
       });
     }
