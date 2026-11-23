@@ -154,6 +154,35 @@
   .k-qr canvas { display:block !important; width:25mm !important; height:25mm !important; }
   .k-foot { font-size:1.9mm; color:#64748b; text-align:center; padding:0.8mm 2mm 1.2mm; border-top:0.2mm solid #e2e8f0; }
 
+  /* ======== KARTU PESERTA UJIAN (ukuran sama dengan kartu pelajar) ======== */
+  .kartu-ujian .k-head { background:linear-gradient(90deg,#065f46,#059669); }
+  .kartu-ujian .k-jud { font-weight:bold; letter-spacing:0.15mm; opacity:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:70mm; }
+  .kartu-ujian .k-body { align-items:stretch; gap:1.6mm; }
+  .kartu-ujian .k-foto { align-self:center; }
+  .kartu-ujian .k-info { align-self:center; }
+  .kartu-ujian .k-info td:first-child { width:14mm; }
+  .kartu-ujian .ku-no { font-family:'Courier New', monospace; font-size:2.25mm; white-space:nowrap; }
+  .ku-ttd { flex:0 0 18.5mm; width:18.5mm; font-size:1.7mm; line-height:1.2; text-align:center; display:flex; flex-direction:column; justify-content:flex-end; padding-bottom:0.5mm; }
+  .ku-ttd .ttd-ruang { height:8mm; }
+  .ku-ttd .ttd-nama { font-weight:bold; text-decoration:underline; word-break:break-word; }
+  .ku-ttd .ttd-nip { font-size:1.45mm; white-space:nowrap; letter-spacing:-0.03mm; }
+  .ku-jadwal { display:none; }
+  #printArea .ku-jadwal { display:block; page-break-before:always; break-before:page; font-family:Arial, Helvetica, sans-serif; color:#000; padding:2mm 4mm; }
+  .ku-kop { display:flex; align-items:center; gap:4mm; border-bottom:0.6mm double #000; padding-bottom:2mm; margin-bottom:5mm; }
+  .ku-kop img, .ku-kop i { width:16mm; height:16mm; font-size:14mm; object-fit:contain; }
+  .ku-kop .pk-sek { font-size:15pt; font-weight:bold; }
+  .ku-kop .pk-sub { font-size:10pt; }
+  .ku-jadwal h3 { text-align:center; font-size:13pt; margin:0 0 1mm; font-weight:bold; color:#000; }
+  .ku-jadwal .ku-sub { text-align:center; font-size:10.5pt; margin-bottom:4mm; }
+  .ku-tbl { width:100%; border-collapse:collapse; font-size:10.5pt; }
+  .ku-tbl th, .ku-tbl td { border:0.3mm solid #000; padding:1.6mm 2mm; vertical-align:middle; }
+  .ku-tbl th { background:#e5e7eb; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .ku-tbl .c { text-align:center; }
+  .ku-catatan { font-size:9.5pt; margin:4mm 0 0; padding-left:5mm; }
+  .ku-ttd-a4 { width:65mm; margin:8mm 0 0 auto; text-align:center; font-size:10.5pt; line-height:1.35; }
+  .ku-ttd-a4 .ttd-ruang { height:20mm; }
+  .ku-ttd-a4 .ttd-nama { font-weight:bold; text-decoration:underline; }
+
   @media print {
     @page { size:A4 portrait; margin:6mm 8mm; }
     body.cetak-kartu > *:not(#printArea) { display:none !important; }
@@ -1048,7 +1077,9 @@ VIEWS.pengaturan = {
           options: [['Asia/Jakarta', 'WIB (Asia/Jakarta)'], ['Asia/Makassar', 'WITA (Asia/Makassar)'], ['Asia/Jayapura', 'WIT (Asia/Jayapura)']] },
         { name: 'semester', label: 'Semester', type: 'select', options: [['Ganjil', 'Ganjil'], ['Genap', 'Genap']], placeholder: false, col: 'col-md-3' },
         { name: 'semester_mulai', label: 'Tanggal mulai semester', type: 'date', col: 'col-md-6', help: 'Dipakai sebagai rentang laporan semester' },
-        { name: 'semester_selesai', label: 'Tanggal akhir semester', type: 'date', col: 'col-md-6' }]) +
+        { name: 'semester_selesai', label: 'Tanggal akhir semester', type: 'date', col: 'col-md-6' },
+        { name: 'kepala_sekolah', label: 'Nama kepala sekolah/madrasah', col: 'col-md-6', help: 'Untuk tanda tangan kartu ujian' },
+        { name: 'nip_kepala_sekolah', label: 'NIP kepala sekolah/madrasah', col: 'col-md-6', help: 'Boleh dikosongkan' }]) +
       sec('Absensi', 'qr-code', [
         { name: 'toleransi_terlambat', label: 'Toleransi terlambat (menit)', type: 'number', min: 0, col: 'col-md-4' },
         { name: 'qr_interval', label: 'QR berganti setiap (detik)', type: 'number', min: 10, col: 'col-md-4' },
@@ -1151,7 +1182,8 @@ const AKSI_LABEL = {
   restoreData: 'PULIHKAN DATA', openSesi: 'Buka sesi absensi', closeSesi: 'Tutup sesi absensi', hapusSesi: 'Hapus sesi absensi',
   setStatusAbsensi: 'Ubah status absen', saveSoal: 'Simpan soal', deleteSoal: 'Hapus soal', importSoal: 'Import soal', saveUjian: 'Simpan ujian',
   deleteUjian: 'Hapus ujian', setStatusUjian: 'Ubah status ujian', unlockSesiUjian: 'Buka kunci ujian siswa', resetSesiUjian: 'Reset ujian siswa',
-  addTimeUjian: 'Tambah waktu ujian', nilaiEsai: 'Nilai esai'
+  addTimeUjian: 'Tambah waktu ujian', nilaiEsai: 'Nilai esai', pindahTingkatSoal: 'Pindah tingkat soal',
+  savePeriodeUjian: 'Simpan periode ujian', hapusPeriodeUjian: 'Hapus periode ujian', kartuUjian: 'Cetak kartu ujian'
 };
 /** Unggah banyak pas foto sekaligus: nama file = NIS atau NISN (mis. 1001.jpg) */
 function fotoMassalDlg(onDone) {
@@ -2841,7 +2873,9 @@ VIEWS.ujianGuru = {
     await getMaster();
     let rows = [];
     el.innerHTML = pageHead('Ujian / CBT', 'Kuis bulanan, UTS, dan UAS berbasis komputer/HP',
-      '<button class="btn btn-light btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button><button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Buat Ujian</button>') +
+      '<button class="btn btn-light btn-sm" data-act="reload"><i class="bi bi-arrow-clockwise"></i></button>' +
+      (S.user.role === 'admin' || (S.user.wali_kelas || []).length ? '<button class="btn btn-outline-primary btn-sm" data-act="kartuUjian"><i class="bi bi-person-vcard"></i> Kartu Ujian</button>' : '') +
+      '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Buat Ujian</button>') +
       '<div class="card"><div class="card-body" id="uList">' + spinner() + '</div></div>';
     async function load() {
       $('#uList', el).innerHTML = spinner();
@@ -2905,7 +2939,7 @@ VIEWS.ujianGuru = {
       });
     }
     bindActs(el, {
-      reload: load, add: () => ujianForm(),
+      reload: load, add: () => ujianForm(), kartuUjian: () => navigate('kartuUjian'),
       edit: id => ujianForm(rows.find(r => r.id === id)),
       mon: id => navigate('monitorUjian', { id }),
       esai: id => navigate('nilaiEsai', { id }),
@@ -3038,6 +3072,176 @@ VIEWS.ujianSiswa = {
             later(() => Exam.open(payload), 300);
           }
         });
+      }
+    });
+    load();
+  }
+};
+</script>
+
+<script>
+/* =============================================================
+ * ViewsKartuUjian.html — Periode UTS/UAS & Kartu Peserta Ujian
+ * Kartu seukuran kartu pelajar (85,6 × 54 mm, 10 per A4). Ruang = kelas.
+ * ============================================================= */
+
+const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+function tglId(iso) { const p = String(iso || '').split('-'); return p.length === 3 ? (+p[2]) + ' ' + NAMA_BULAN[+p[1] - 1] + ' ' + p[0] : ''; }
+function rentangTgl(a, b) {
+  if (a === b) return tglId(a);
+  const x = a.split('-'), y = b.split('-');
+  if (x[0] === y[0] && x[1] === y[1]) return (+x[2]) + '–' + tglId(b);
+  if (x[0] === y[0]) return (+x[2]) + ' ' + NAMA_BULAN[+x[1] - 1] + ' – ' + tglId(b);
+  return tglId(a) + ' – ' + tglId(b);
+}
+// MI / MTs / MA / Madrasah → "Kepala Madrasah"
+function labelKepala(sekolah) { return /^\s*(MIN?|MTsN?|MAN?|madrasah)\b/i.test(sekolah || '') ? 'Kepala Madrasah' : 'Kepala Sekolah'; }
+const STATUS_PERIODE = { BERLANGSUNG: ['Berlangsung', 'success'], AKAN: ['Akan datang', 'primary'], SELESAI: ['Selesai', 'secondary'] };
+
+function cetakKartuUjian(d, ids, denganJadwal) {
+  const kartu = d.kartu.filter(c => ids.indexOf(c.user_id) >= 0);
+  if (!kartu.length) return toast('Pilih minimal satu siswa', 'warning');
+  const p = d.periode, kep = labelKepala(d.sekolah);
+  const ttd = cls => '<div class="' + cls + '"><div>' + esc(kep) + ',</div><div class="ttd-ruang"></div>' +
+    '<div class="ttd-nama">' + (d.kepala_sekolah ? esc(d.kepala_sekolah) : '&nbsp;') + '</div>' +
+    (d.nip_kepala_sekolah ? '<div class="ttd-nip">NIP. ' + esc(d.nip_kepala_sekolah) + '</div>' : '') + '</div>';
+  let html = '<div class="kartu-sheet">' + kartu.map(c =>
+    '<div class="kartu kartu-ujian">' +
+    '<div class="k-head">' + LOGO.html() + '<div class="k-head-t"><div class="k-sek">' + esc(d.sekolah || '') + '</div>' +
+      '<div class="k-jud">KARTU PESERTA ' + esc(p.nama.toUpperCase()) + '</div></div></div>' +
+    '<div class="k-body"><img class="k-foto" src="' + esc(fotoSrc(c.foto, c.jk)) + '" alt="">' +
+    '<div class="k-info"><div class="k-nama">' + esc(c.nama) + '</div>' +
+    '<table><tr><td>No. Peserta</td><td>: <b class="ku-no">' + esc(c.nomor) + '</b></td></tr>' +
+    '<tr><td>NISN</td><td>: ' + esc(c.nisn) + '</td></tr>' +
+    '<tr><td>Kelas/Ruang</td><td>: ' + esc(c.kelas) + '</td></tr>' +
+    '<tr><td>Username</td><td>: ' + esc(c.username) + '</td></tr></table></div>' +
+    ttd('ku-ttd') + '</div>' +
+    '<div class="k-foot">Berlaku ' + esc(rentangTgl(p.tanggal_mulai, p.tanggal_selesai)) + ' · Wajib dibawa setiap hari ujian</div>' +
+    '</div>').join('') + '</div>';
+  if (denganJadwal) {
+    const kelasList = [...new Map(kartu.map(c => [c.kelas_id, c.kelas])).entries()];
+    html += kelasList.map(([kid, kn]) => {
+      const j = (d.jadwal || {})[kid] || [];
+      return '<div class="ku-jadwal">' +
+        '<div class="ku-kop">' + LOGO.html() + '<div><div class="pk-sek">' + esc(d.sekolah || '') + '</div><div class="pk-sub">Tahun Ajaran ' + esc(p.tahun_ajaran) + ' · Semester ' + esc(p.semester) + '</div></div></div>' +
+        '<h3>JADWAL ' + esc(p.nama.toUpperCase()) + '</h3>' +
+        '<div class="ku-sub">Kelas/Ruang: <b>' + esc(kn) + '</b> · ' + esc(rentangTgl(p.tanggal_mulai, p.tanggal_selesai)) + '</div>' +
+        '<table class="ku-tbl"><thead><tr><th style="width:8%">No</th><th style="width:28%">Hari, Tanggal</th><th style="width:20%">Waktu</th><th>Mata Pelajaran</th><th style="width:12%">Durasi</th></tr></thead><tbody>' +
+        (j.length ? j.map((r, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(r.hari) + ', ' + esc(tglId(r.tanggal)) + '</td><td class="c">' + esc(r.mulai) + '–' + esc(r.selesai) +
+          (r.selesai_tgl !== r.tanggal ? '<br><small>(s.d. ' + esc(tglId(r.selesai_tgl)) + ')</small>' : '') + '</td><td>' + esc(r.mapel) + '</td><td class="c">' + esc(r.durasi) + ' menit</td></tr>').join('')
+          : '<tr><td colspan="5" class="c" style="padding:6mm">Belum ada ujian ' + esc(p.jenis) + ' (CBT) yang dijadwalkan untuk kelas ini dalam periode tersebut.</td></tr>') +
+        '</tbody></table>' +
+        '<ul class="ku-catatan"><li>Bawa kartu peserta setiap hari ujian dan tunjukkan kepada pengawas.</li><li>Login CBT memakai username pada kartu dan password akun masing-masing.</li>' +
+        '<li>Hadir paling lambat 15 menit sebelum ujian dimulai.</li></ul>' +
+        ttd('ku-ttd-a4') + '</div>';
+    }).join('');
+  }
+  let area = $('#printArea');
+  if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+  area.innerHTML = html;
+  document.body.classList.add('cetak-kartu');
+  const selesai = () => { document.body.classList.remove('cetak-kartu'); window.removeEventListener('afterprint', selesai); };
+  window.addEventListener('afterprint', selesai);
+  toast('Menyiapkan ' + kartu.length + ' kartu ujian… Pilih kertas A4, skala 100%, centang "Background graphics".', 'info');
+  setTimeout(() => { window.print(); setTimeout(selesai, 1500); }, 600);
+}
+
+/** Dialog cetak: pilih kelas → daftar siswa bernomor peserta (bisa dipilih sebagian untuk cetak ulang) */
+async function cetakKartuUjianDlg(per) {
+  await getMaster();
+  const kelasBoleh = S.user.role === 'admin' ? kelasOpts() : kelasOpts().filter(k => (S.user.wali_kelas || []).indexOf(k[0]) >= 0);
+  if (!kelasBoleh.length) return toast('Anda bukan wali kelas', 'warning');
+  let data = null;
+  const el = modal({
+    title: 'Cetak Kartu Ujian – ' + per.nama, size: 'lg',
+    body: '<div class="row g-2 align-items-end mb-2"><div class="col-md-6"><label class="form-label small fw-semibold mb-1" for="kuKelas">Kelas</label>' +
+      '<select class="form-select" id="kuKelas">' + optionsHtml(kelasBoleh, kelasBoleh.length === 1 ? kelasBoleh[0][0] : '', '— pilih kelas —') + '</select></div>' +
+      '<div class="col-md-6"><div class="form-check"><input class="form-check-input" type="checkbox" id="kuJadwal" checked>' +
+      '<label class="form-check-label" for="kuJadwal">Sertakan lembar jadwal ujian kelas (1 halaman A4)</label></div></div></div>' +
+      '<p class="small text-muted mb-2">Ukuran kartu pelajar (8,5 × 5,4 cm), 10 kartu per A4. Nomor peserta dibuat sekali dan tetap sama saat dicetak ulang. ' +
+      'Untuk kartu hilang, cukup centang siswa tersebut saja.</p>' +
+      '<div id="kuList"></div>',
+    footer: '<button class="btn btn-light" data-bs-dismiss="modal">Tutup</button><button class="btn btn-primary" id="kuCetak" disabled><i class="bi bi-printer"></i> Cetak</button>'
+  });
+  const list = $('#kuList', el), btn = $('#kuCetak', el);
+  const hitung = () => { const n = $$('.ku-cb:checked', el).length; btn.disabled = !n; btn.innerHTML = '<i class="bi bi-printer"></i> Cetak ' + n + ' kartu'; };
+  async function muat() {
+    const k = $('#kuKelas', el).value; data = null; btn.disabled = true;
+    if (!k) { list.innerHTML = ''; return; }
+    list.innerHTML = spinner();
+    try { data = await api('kartuUjian', { periode_id: per.id, kelas_id: k }, { silent: true }); }
+    catch (e) { list.innerHTML = '<div class="alert alert-danger small">' + esc(e.message) + '</div>'; return; }
+    const nJ = ((data.jadwal || {})[k] || []).length;
+    list.innerHTML = (data.kartu.length ? '<div class="small mb-2 ' + (nJ ? 'text-success' : 'text-warning') + '"><i class="bi bi-calendar-check"></i> ' +
+        (nJ ? nJ + ' ujian ' + esc(per.jenis) + ' (CBT) terjadwal untuk kelas ini.' : 'Belum ada ujian ' + esc(per.jenis) + ' (CBT) untuk kelas ini dalam periode tersebut — lembar jadwal akan kosong.') + '</div>' +
+      '<div class="table-responsive" style="max-height:340px"><table class="table table-sm align-middle mb-0"><thead class="table-light"><tr>' +
+      '<th style="width:36px"><input class="form-check-input" type="checkbox" id="kuAll" checked title="Pilih semua"></th><th>No. Peserta</th><th>Nama</th><th>NISN</th><th>Foto</th></tr></thead><tbody>' +
+      data.kartu.map(c => '<tr><td><input class="form-check-input ku-cb" type="checkbox" value="' + esc(c.user_id) + '" checked></td><td class="font-monospace small">' + esc(c.nomor) + '</td>' +
+        '<td>' + esc(c.nama) + '</td><td class="small">' + esc(c.nisn) + '</td><td>' + (c.foto ? badge('Ada', 'success') : badge('Dummy', 'secondary')) + '</td></tr>').join('') +
+      '</tbody></table></div>' : emptyState('Tidak ada siswa aktif di kelas ini'));
+    const all = $('#kuAll', el);
+    if (all) all.onchange = e => { $$('.ku-cb', el).forEach(c => { c.checked = e.target.checked; }); hitung(); };
+    $$('.ku-cb', el).forEach(c => c.onchange = () => { if (all) all.checked = $$('.ku-cb:not(:checked)', el).length === 0; hitung(); });
+    hitung();
+  }
+  $('#kuKelas', el).onchange = muat;
+  btn.onclick = () => {
+    if (!data) return;
+    const ids = $$('.ku-cb:checked', el).map(c => c.value), jd = $('#kuJadwal', el).checked;
+    closeModal(); later(() => cetakKartuUjian(data, ids, jd), 400);
+  };
+  if (kelasBoleh.length === 1) muat();
+}
+
+VIEWS.kartuUjian = {
+  title: 'Kartu Ujian',
+  render: async function (el) {
+    const admin = S.user.role === 'admin';
+    el.innerHTML = pageHead('Kartu Ujian', 'Kartu peserta UTS/UAS seukuran kartu pelajar. Buat periode ujian, lalu cetak per kelas.',
+      '<button class="btn btn-light btn-sm" data-act="back"><i class="bi bi-arrow-left"></i> Ujian / CBT</button>' +
+      (admin ? '<button class="btn btn-primary btn-sm" data-act="add"><i class="bi bi-plus-lg"></i> Periode UTS/UAS</button>' : '')) +
+      '<div id="kuInfo"></div><div id="kuPer">' + spinner() + '</div>';
+    let rows = [];
+    async function load() {
+      rows = await api('listPeriodeUjian', {}, { silent: true });
+      if (admin) {
+        const st = await api('getSettings', {}, { silent: true });
+        $('#kuInfo', el).innerHTML = st.kepala_sekolah ? '' : '<div class="alert alert-warning small py-2"><i class="bi bi-pen"></i> Nama kepala sekolah/madrasah untuk tanda tangan kartu belum diisi. ' +
+          '<a href="#" data-act="pengaturan">Isi di Pengaturan → Identitas</a>.</div>';
+      }
+      $('#kuPer', el).innerHTML = rows.length ? '<div class="row g-3">' + rows.map(p => {
+        const stt = STATUS_PERIODE[p.status] || ['', 'secondary'];
+        return '<div class="col-md-6 col-xl-4"><div class="card h-100' + (p.status === 'BERLANGSUNG' ? ' border-success' : '') + '"><div class="card-body">' +
+          '<div class="d-flex justify-content-between align-items-start mb-1"><span class="badge text-bg-dark">' + esc(p.jenis) + '</span>' + badge(stt[0], stt[1]) + '</div>' +
+          '<h5 class="mb-1">' + esc(p.nama) + '</h5><div class="small text-muted mb-2"><i class="bi bi-calendar-range"></i> ' + esc(rentangTgl(p.tanggal_mulai, p.tanggal_selesai)) + '</div>' +
+          '<div class="small">' + p.jumlah_ujian + ' ujian ' + esc(p.jenis) + ' (CBT) dalam periode · ' + p.jumlah_peserta + ' siswa sudah bernomor peserta</div></div>' +
+          '<div class="card-footer bg-transparent d-flex gap-2 flex-wrap">' + actBtn('cetak', p.id, 'printer', 'Cetak Kartu', 'primary') +
+          (admin ? actBtn('edit', p.id, 'pencil', 'Ubah') + actBtn('del', p.id, 'trash', 'Hapus', 'outline-danger') : '') + '</div></div></div>';
+      }).join('') + '</div>'
+        : emptyState(admin ? 'Belum ada periode UTS/UAS. Klik "Periode UTS/UAS" untuk membuat.' : 'Belum ada periode UTS/UAS. Hubungi admin.', 'person-vcard');
+    }
+    const form = p => formModal({
+      title: p ? 'Ubah Periode Ujian' : 'Periode UTS/UAS Baru',
+      intro: '<p class="small text-muted">Ujian CBT berjenis sama yang dimulai dalam rentang tanggal ini otomatis masuk ke lembar jadwal kartu.</p>',
+      values: Object.assign({ jenis: 'UAS', nama: '' }, p || {}),
+      fields: [
+        { name: 'id', type: 'hidden' },
+        { name: 'jenis', label: 'Jenis', type: 'select', placeholder: false, options: [['UTS', 'UTS (Penilaian Tengah Semester)'], ['UAS', 'UAS (Penilaian Akhir Semester)']], col: 'col-md-5' },
+        { name: 'nama', label: 'Nama periode', col: 'col-md-7', placeholder: 'Otomatis, mis. UAS Ganjil ' + (S.settings.tahun_ajaran || '') },
+        { name: 'tanggal_mulai', label: 'Tanggal mulai', type: 'date', required: true, col: 'col-md-6' },
+        { name: 'tanggal_selesai', label: 'Tanggal selesai', type: 'date', required: true, col: 'col-md-6' }
+      ],
+      onSubmit: async d => { await api('savePeriodeUjian', d); toast('Periode disimpan', 'success'); load(); }
+    });
+    bindActs(el, {
+      back: () => navigate('ujianGuru'), add: () => form(), pengaturan: () => navigate('pengaturan'),
+      edit: id => form(rows.find(r => r.id === id)),
+      cetak: id => cetakKartuUjianDlg(rows.find(r => r.id === id)),
+      del: async id => {
+        const p = rows.find(r => r.id === id);
+        if (await confirmDlg('Hapus periode "' + p.nama + '"? Nomor peserta periode ini ikut terhapus (ujian CBT tidak terhapus).', 'Hapus', 'danger')) {
+          await api('hapusPeriodeUjian', { id }); toast('Periode dihapus', 'success'); load();
+        }
       }
     });
     load();
